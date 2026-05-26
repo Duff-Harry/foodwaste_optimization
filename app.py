@@ -1,381 +1,781 @@
 """
 app.py
 ======
-Streamlit web interface for the Food Waste Processing
-Optimization Tool (PhD Research).
- 
-Tabs:
-    1. Instructions
-    2. Feed Inputs
-    3. Economic Parameters
-    4. Run Optimization
-    5. Results — Pareto Front
-    6. Results — Cost Breakdown
+ECO-FAST - Food Waste Processing Optimization Tool
 """
- 
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
- 
+import base64
+import os
+import requests
+import time
+
 from food_waste_database import (
-    get_waste_types,
-    get_composition,
-    get_description,
-    get_references,
-    get_HHV,
-    validate_composition,
+    get_waste_types, get_composition, get_description,
+    get_references, get_HHV, validate_composition,
 )
-from model.solver import run_optimization
- 
+
 # ============================================================
 # PAGE CONFIG
 # ============================================================
 st.set_page_config(
-    page_title="Food Waste Optimization Tool",
-    page_icon="♻️",
+    page_title="ECO-FAST",
+    page_icon="🌿",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
- 
+
 # ============================================================
-# CUSTOM CSS
+# CSS
 # ============================================================
 st.markdown("""
 <style>
-    .main-title {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #2E7D32;
-        text-align: center;
-        padding: 1rem 0 0.5rem 0;
+    .stApp { background-color: #D4D0C8; }
+    header[data-testid="stHeader"] { display: none !important; }
+    .block-container { padding-top: 0rem !important; margin-top: 0rem !important; }
+    [data-testid="stAppViewContainer"] { padding-top: 0rem !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #D4D0C8;
+        border-bottom: 2px solid #808080;
+        gap: 0px; padding: 0px 8px;
     }
-    .sub-title {
-        font-size: 1rem;
-        color: #555;
-        text-align: center;
-        margin-bottom: 1.5rem;
+    .stTabs [data-baseweb="tab"] {
+        background-color: #D4D0C8;
+        border: 1px solid #808080;
+        border-bottom: none;
+        border-radius: 4px 4px 0 0;
+        padding: 6px 16px;
+        font-size: 13px;
+        color: #000000;
+        margin-right: 2px;
     }
-    .section-header {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #1B5E20;
-        border-bottom: 2px solid #A5D6A7;
-        padding-bottom: 4px;
-        margin-bottom: 12px;
+    .stTabs [aria-selected="true"] {
+        background-color: #FFFFFF !important;
+        border-bottom: 2px solid #FFFFFF !important;
+        font-weight: bold;
     }
-    .info-box {
-        background: #F1F8E9;
-        border-left: 4px solid #66BB6A;
-        padding: 12px 16px;
-        border-radius: 4px;
-        margin-bottom: 12px;
-    }
-    .warning-box {
-        background: #FFF8E1;
-        border-left: 4px solid #FFA000;
-        padding: 12px 16px;
-        border-radius: 4px;
-        margin-bottom: 12px;
-    }
-    .result-metric {
-        background: #E8F5E9;
-        border-radius: 8px;
+    .stTabs [data-baseweb="tab-panel"] {
+        background-color: #FFFFFF;
+        border: 1px solid #808080;
+        border-top: none;
         padding: 16px;
-        text-align: center;
     }
+    .stButton button {
+        background-color: #D4D0C8 !important;
+        border: 2px solid #808080 !important;
+        border-radius: 3px !important;
+        color: #000000 !important;
+        font-size: 12px !important;
+        padding: 4px 12px !important;
+    }
+    .stButton button:hover { background-color: #BDB9B0 !important; }
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    .stNumberInput input:disabled,
+    .stTextInput input:disabled {
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+        opacity: 1 !important;
+        font-weight: 500 !important;
+    }
+    .stNumberInput label,
+    .stTextInput label,
+    .stSelectbox label,
+    .stSlider label {
+        color: #000000 !important;
+        opacity: 1 !important;
+        font-weight: 500 !important;
+    }
+    .stSelectbox div[data-baseweb="select"] {
+        color: #000000 !important;
+        opacity: 1 !important;
+    }
+    .ej-score-high { color: #CC0000; font-weight: bold; }
+    .ej-score-med  { color: #FF8800; font-weight: bold; }
+    .ej-score-low  { color: #2E8B57; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
- 
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+def section_header(text, top=6, bottom=6):
+    st.markdown(
+        f'<div style="font-weight:bold; font-size:18px; color:#1a1a1a; '
+        f'padding-top:{top}px; padding-bottom:{bottom}px; '
+        f'line-height:1.6; overflow:visible;">{text}</div>',
+        unsafe_allow_html=True,
+    )
+
+def nav_buttons(save_key, tab_index, save_action=None):
+    pass
+
+def fetch_ejscreen(zipcode):
+    try:
+        geo_url = (
+            "https://geocoding.geo.census.gov/geocoder/locations/address"
+            f"?zip={zipcode}&benchmark=Public_AR_Current&format=json"
+        )
+        geo_r = requests.get(geo_url, timeout=10)
+        geo_data = geo_r.json()
+        matches = geo_data.get("result", {}).get("addressMatches", [])
+        if not matches:
+            return None
+        coords = matches[0]["coordinates"]
+        lat, lon = coords["y"], coords["x"]
+
+        fcc_url = (
+            f"https://geo.fcc.gov/api/census/block/find"
+            f"?latitude={lat}&longitude={lon}&format=json"
+        )
+        fcc_r = requests.get(fcc_url, timeout=10)
+        fcc_data = fcc_r.json()
+        fips = fcc_data.get("Block", {}).get("FIPS", "")
+        if not fips or len(fips) < 12:
+            return None
+        bg_fips = fips[:12]
+
+        arcgis_url = (
+            "https://ejscreen.epa.gov/arcgis/rest/services/ejscreen/"
+            "ejscreen_indexes_usa_2024_public/MapServer/0/query"
+            f"?where=ID='{bg_fips}'&outFields=*&f=json"
+        )
+        ej_r = requests.get(arcgis_url, timeout=15)
+        ej_data = ej_r.json()
+        features = ej_data.get("features", [])
+        if not features:
+            return None
+        attrs = features[0].get("attributes", {})
+
+        return {
+            "lat": lat, "lon": lon,
+            "pct_minority":   (attrs.get("MINORPCT",  0) or 0) * 100,
+            "pct_lowincome":  (attrs.get("LOWINCPCT", 0) or 0) * 100,
+            "pct_less_hs":    (attrs.get("LESSHSPCT", 0) or 0) * 100,
+            "pm25":           attrs.get("PM25",  0) or 0,
+            "ozone":          attrs.get("OZONE", 0) or 0,
+            "diesel_pm":      attrs.get("DSLPM", 0) or 0,
+            "superfund_prox": attrs.get("PNPL",  0) or 0,
+            "ej_index":       attrs.get("EJSCREEN_SCORE_2", 0) or 0,
+            "ej_pctile":      attrs.get("P_EJDX_D2", 0) or 0,
+        }
+    except Exception:
+        return None
+
+def ej_risk_label(pctile):
+    if pctile >= 80:
+        return '<span class="ej-score-high">HIGH</span>'
+    elif pctile >= 50:
+        return '<span class="ej-score-med">MODERATE</span>'
+    else:
+        return '<span class="ej-score-low">LOW</span>'
+
+
 # ============================================================
 # HEADER
 # ============================================================
-st.markdown('<div class="main-title">♻️ Food Waste Processing Optimization</div>',
-            unsafe_allow_html=True)
-st.markdown(
-    '<div class="sub-title">Multi-objective optimization: minimize cost & GHG emissions '
-    '| PhD Research Tool</div>',
-    unsafe_allow_html=True
-)
- 
+def img_to_base64(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+try:
+    rowan_b64 = img_to_base64("rowan_logo.png")
+    njdep_b64 = img_to_base64("njdep_logo.png")
+    st.markdown(f"""
+    <div style="background-color:#D4D0C8; padding:1px 16px;
+                display:flex; align-items:center; justify-content:space-between;">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <div style="background:#2E8B57; color:white; font-weight:900;
+                        font-size:24px; width:56px; height:56px;
+                        display:flex; align-items:center; justify-content:center;
+                        border-radius:12px; font-family:Arial; flex-shrink:0;">EF</div>
+            <div>
+                <div style="font-size:24px; font-weight:bold;
+                            font-family:Arial; color:#000; line-height:1.2;">ECO-FAST</div>
+                <div style="font-size:12px; font-family:Arial; color:#444;">
+                    Ecological Impact of Food Waste Recycle Effluent</div>
+            </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:1px;">
+            <img src="data:image/png;base64,{rowan_b64}"
+                 style="height:70px; width:135px; object-fit:contain;
+                        mix-blend-mode:multiply; background:transparent;">
+            <img src="data:image/png;base64,{njdep_b64}"
+                 style="height:70px; width:70px; object-fit:contain;
+                        mix-blend-mode:multiply; background:transparent;">
+        </div>
+    </div>
+    <hr style="margin:0; border-color:#808080;">
+    """, unsafe_allow_html=True)
+except:
+    st.markdown("<hr style='margin:2px 0 0 0; border-color:#808080;'>",
+                unsafe_allow_html=True)
+
 # ============================================================
 # TABS
 # ============================================================
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📋 Instructions",
-    "🗑️ Feed Inputs",
-    "💰 Economic Parameters",
-    "⚙️ Run Optimization",
-    "📈 Pareto Front",
-    "📊 Cost Breakdown",
+    "Instructions",
+    "Feed Inputs",
+    "Technology Specifications",
+    "Cost Specifications",
+    "Results",
+    "Environmental Justice",
 ])
- 
- 
+
 # ============================================================
-# TAB 1 — INSTRUCTIONS
+# TAB 1 - INSTRUCTIONS
 # ============================================================
 with tab1:
-    st.markdown('<div class="section-header">Welcome</div>', unsafe_allow_html=True)
-    st.markdown("""
-    This tool optimizes the processing of food waste using a **Mixed Integer Nonlinear
-    Programming (MINLP)** model. It simultaneously minimizes **Net Annual Cost (NAC)**
-    and **Greenhouse Gas (GHG) emissions** to generate a Pareto front of optimal solutions.
- 
-    **How to use this tool:**
- 
-    1. **Feed Inputs** — Select your food waste type or enter your own composition.
-       Set the feed flow rate and operating hours.
- 
-    2. **Economic Parameters** — Set electricity cost, tipping fee, labor cost,
-       capital recovery factor, and product selling prices.
- 
-    3. **Run Optimization** — Click the button to run the optimization.
-       The BARON solver will find the optimal technology configuration.
- 
-    4. **Pareto Front** — View the trade-off between cost and GHG emissions
-       across all Pareto-optimal solutions.
- 
-    5. **Cost Breakdown** — View the detailed cost breakdown for each solution.
-    """)
- 
-    st.markdown('<div class="section-header">Technology Options</div>',
-                unsafe_allow_html=True)
- 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**Mechanical Pretreatment**")
-        st.markdown("- SHR — Shredder\n- MCR — Macerator\n- Bypass")
-    with col2:
-        st.markdown("**Biological Pretreatment**")
-        st.markdown("- AER — Aerobic Biodigester\n- ENZ — Enzymatic Hydrolysis\n- Bypass")
-    with col3:
-        st.markdown("**Conversion Technology**")
-        st.markdown("- HTL — Hydrothermal Liquefaction\n- AND — Anaerobic Digestion\n"
-                    "- SLF — Sanitary Landfill\n- CMP — Composting\n"
-                    "- WWT — Wastewater Treatment\n- INC — Incineration")
- 
-    st.markdown("""
-    > **Note:** The model uses the **BARON** solver for global optimization of MINLP problems.
-    > Each Pareto point may take 2–5 minutes to solve. With 10 Pareto points, expect
-    > approximately 20–50 minutes total runtime.
-    """)
- 
- 
+    section_header("Purpose")
+    st.markdown(
+        "ECO-FAST is a decision-support tool for the selection and design of food waste processing systems. "
+        "Given a food waste stream, the tool evaluates all possible processing pathways from the superstructure "
+        "and provides three types of results:"
+    )
+    st.markdown(
+        "**Lowest Cost Pathway:** the processing pathway that minimizes net annual cost regardless of emissions  \n"
+        "**Lowest Emissions Pathway:** the processing pathway that minimizes greenhouse gas emissions regardless of cost  \n"
+        "**Lowest Cost & Emissions Pathway:** the processing pathway that represents the best balance of cost and emissions"
+    )
+
+    section_header("Food Waste Superstructure")
+    if os.path.exists("Superstructure.tif"):
+        col_left, col_mid, col_right = st.columns([1, 3, 1])
+        with col_mid:
+            st.image("Superstructure.tif", use_container_width=True)
+    else:
+        st.info("Place Superstructure.tif in the project folder to display the diagram.")
+
+    st.markdown("")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        section_header("Pretreatment")
+        st.markdown("- **Mechanical:** Shredding (SHR), Maceration (MCR)\n- **Biological:** Aerobic biodigestion (AER), Enzymatic hydrolysis (ENZ)")
+    with col_b:
+        section_header("Conversion")
+        st.markdown("- Hydrothermal liquefaction (HTL)\n- Anaerobic digestion (AND)\n- Composting (CMP)\n- Sanitary landfill (SLF)\n- Wastewater treatment (WWT)\n- Incineration (INC)")
+    with col_c:
+        section_header("Recovery & Upgrading")
+        st.markdown("- Centrifugation (CEN), Filtration (FLT)\n- Amine scrubbing (ABS), PSA gas upgrading\n- Steam turbine (STB)")
+
+    st.markdown("")
+    section_header("How to Use")
+    st.markdown(
+        "1. **Feed Inputs:** Define your food waste type, composition, flow rate, operating hours, and facility zip code.\n"
+        "2. **Technology Specifications:** Review and adjust default values for each technology.\n"
+        "3. **Cost Specifications:** Configure economic parameters and solver settings.\n"
+        "4. **Results:** Select an objective and run the optimization.\n"
+        "5. **Environmental Justice:** View the EPA EJScreen assessment for your facility location."
+    )
+
+
 # ============================================================
-# TAB 2 — FEED INPUTS
+# TAB 2 - FEED INPUTS
 # ============================================================
 with tab2:
-    st.markdown('<div class="section-header">Food Waste Type</div>',
-                unsafe_allow_html=True)
- 
-    waste_types = get_waste_types()
-    selected_waste = st.selectbox(
-        "Select food waste type",
-        waste_types,
-        index=0,
-        help="Select a food waste type to auto-fill composition, "
-             "or choose 'Custom' to enter your own data."
-    )
- 
-    # Show description and references
-    desc = get_description(selected_waste)
-    refs = get_references(selected_waste)
-    st.markdown(f'<div class="info-box">{desc}</div>', unsafe_allow_html=True)
-    st.caption(f"References: {', '.join(refs)}")
- 
-    # Load composition
-    comp = get_composition(selected_waste)
-    is_custom = selected_waste == "Custom (Enter Your Own Data)"
- 
-    st.markdown('<div class="section-header">Feed Composition (Wet Basis)</div>',
-                unsafe_allow_html=True)
- 
-    col1, col2, col3, col4 = st.columns(4)
- 
-    with col1:
-        WATER = st.number_input("Water (WATER)", 0.0, 1.0,
-                                float(comp["WATER"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
-        CBH   = st.number_input("Carbohydrates (CBH)", 0.0, 1.0,
-                                float(comp["CBH"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
- 
-    with col2:
-        PRT   = st.number_input("Protein (PRT)", 0.0, 1.0,
-                                float(comp["PRT"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
-        FAT   = st.number_input("Fat / Lipid (FAT)", 0.0, 1.0,
-                                float(comp["FAT"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
- 
-    with col3:
-        OTH   = st.number_input("Other Organics (OTH)", 0.0, 1.0,
-                                float(comp["OTH"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
-        ASH   = st.number_input("Ash (ASH)", 0.0, 1.0,
-                                float(comp["ASH"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
- 
-    with col4:
-        FC    = st.number_input("Fixed Carbon (FC)", 0.0, 1.0,
-                                float(comp["FIXED_CARBON"]),
-                                step=0.001, format="%.4f",
-                                disabled=not is_custom)
-        total = WATER + CBH + PRT + FAT + OTH + ASH + FC
-        st.metric("Sum of fractions", f"{total:.4f}",
-                  delta=f"{total - 1.0:.4f}",
-                  delta_color="off" if abs(total - 1.0) < 0.01 else "inverse")
- 
-    if abs(total - 1.0) > 0.01:
-        st.markdown(
-            '<div class="warning-box">⚠️ Fractions do not sum to 1.0. '
-            'Please adjust the values.</div>',
-            unsafe_allow_html=True
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        section_header("Food Waste Type")
+        waste_types = get_waste_types()
+        selected_waste = st.selectbox(
+            "Food Waste Type", waste_types,
+            index=None,
+            placeholder="Select a food waste type...",
+            label_visibility="collapsed"
         )
- 
-    st.markdown('<div class="section-header">Operating Conditions</div>',
-                unsafe_allow_html=True)
- 
-    col1, col2 = st.columns(2)
-    with col1:
-        Qf   = st.number_input("Feed flow rate (kg/hr)", 100.0, 50000.0,
-                               1000.0, step=100.0,
-                               help="Mass flow rate of food waste feed")
-    with col2:
-        Tann = st.number_input("Annual operating hours (hr/yr)", 1000.0, 8760.0,
-                               7920.0, step=100.0,
-                               help="Number of operating hours per year")
- 
-    # HHV display
-    HHV = get_HHV(selected_waste)
-    st.info(f"Higher Heating Value (HHV): **{HHV} MJ/kg** (wet basis)")
- 
-    # Store in session state
+
+        if selected_waste is None:
+            st.info("Please select a food waste type to continue.")
+            st.stop()
+
+        section_header("Feed Stream Conditions")
+        col_flow, col_flow_unit = st.columns([2, 1])
+        with col_flow:
+            Qf_input = st.number_input("Feed flow rate", 0.0, 1000000.0,
+                                       1000.0, step=100.0,
+                                       label_visibility="collapsed")
+        with col_flow_unit:
+            flow_unit = st.selectbox("Flow unit",
+                                     ["kg/hr", "t/day", "lb/hr", "kg/day"],
+                                     label_visibility="collapsed")
+
+        flow_conversions = {"kg/hr": 1.0, "t/day": 1000.0/24.0,
+                            "lb/hr": 0.453592, "kg/day": 1.0/24.0}
+        Qf = Qf_input * flow_conversions[flow_unit]
+
+        col_hr, col_hr_unit = st.columns([2, 1])
+        with col_hr:
+            Tann_input = st.number_input("Operating hours", 0.0, 10000.0,
+                                         7920.0, step=100.0,
+                                         label_visibility="collapsed")
+        with col_hr_unit:
+            hr_unit = st.selectbox("Hours unit",
+                                   ["hr/yr", "days/yr", "weeks/yr"],
+                                   label_visibility="collapsed")
+
+        hr_conversions = {"hr/yr": 1.0, "days/yr": 24.0, "weeks/yr": 168.0}
+        Tann = Tann_input * hr_conversions[hr_unit]
+
+        section_header("Facility Location")
+        zipcode = st.text_input(
+            "Facility zip code (US only)",
+            placeholder="e.g. 08028",
+            label_visibility="collapsed"
+        )
+        if zipcode:
+            st.caption(f"Zip code: {zipcode} — EJ data will appear in the Environmental Justice tab.")
+            st.session_state["zipcode"] = zipcode
+        else:
+            st.caption("Enter a zip code to enable Environmental Justice assessment.")
+            st.session_state["zipcode"] = None
+
+        section_header("Composition (wet basis)")
+        is_custom = selected_waste == "Custom (Enter Your Own Data)"
+        comp = get_composition(selected_waste)
+
+        if st.session_state.get("_last_waste") != selected_waste:
+            for k in ["comp_water", "comp_cbh", "comp_prt", "comp_fat",
+                      "comp_oth", "comp_ash", "comp_fc"]:
+                if k in st.session_state:
+                    del st.session_state[k]
+            st.session_state["_last_waste"] = selected_waste
+
+        c1, c2 = st.columns(2)
+        with c1:
+            WATER = st.number_input("Water",          0.0, 1.0, float(comp["WATER"]),        0.001, format="%.4f", disabled=not is_custom, key="comp_water")
+            PRT   = st.number_input("Protein",        0.0, 1.0, float(comp["PRT"]),          0.001, format="%.4f", disabled=not is_custom, key="comp_prt")
+            OTH   = st.number_input("Other Organics", 0.0, 1.0, float(comp["OTH"]),          0.001, format="%.4f", disabled=not is_custom, key="comp_oth")
+            FC    = st.number_input("Fixed Carbon",   0.0, 1.0, float(comp["FIXED_CARBON"]), 0.001, format="%.4f", disabled=not is_custom, key="comp_fc")
+        with c2:
+            CBH   = st.number_input("Carbohydrates",  0.0, 1.0, float(comp["CBH"]),          0.001, format="%.4f", disabled=not is_custom, key="comp_cbh")
+            FAT   = st.number_input("Fat / Lipid",    0.0, 1.0, float(comp["FAT"]),          0.001, format="%.4f", disabled=not is_custom, key="comp_fat")
+            ASH   = st.number_input("Ash",            0.0, 1.0, float(comp["ASH"]),          0.001, format="%.4f", disabled=not is_custom, key="comp_ash")
+            total = WATER + CBH + PRT + FAT + OTH + ASH + FC
+            st.text_input("Total Mass Fraction", value=f"{total:.4f}", disabled=True)
+
+        if abs(total - 1.0) >= 0.01:
+            st.error(f"Composition must sum to 1.0 (currently {total:.4f}).")
+
+    with col_right:
+        section_header("Energy & Organic Content")
+        HHV = get_HHV(selected_waste)
+        TS  = (1 - WATER) * 100
+        VS  = (CBH + PRT + FAT + OTH) * 100
+        CN  = round((0.43270 * (CBH + PRT + FAT + OTH)) /
+                    max(0.07170 * PRT, 0.0001), 2)
+
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        with col_m1:
+            st.markdown(f"<div style='text-align:center'>Higher Heating Value<br><b>(HHV)</b><br>{HHV:.2f} MJ/kg</div>", unsafe_allow_html=True)
+        with col_m2:
+            st.markdown(f"<div style='text-align:center'>Volatile Solids<br><b>(VS)</b><br>{VS:.2f} %</div>", unsafe_allow_html=True)
+        with col_m3:
+            st.markdown(f"<div style='text-align:center'>Total Solids<br><b>(TS)</b><br>{TS:.2f} %</div>", unsafe_allow_html=True)
+        with col_m4:
+            st.markdown(f"<div style='text-align:center'>C/N Ratio<br><b>(C/N)</b><br>{CN:.1f}</div>", unsafe_allow_html=True)
+
+        section_header("Composition Breakdown", top=80, bottom=0)
+        st.markdown('<div style="margin-bottom:-60px;"></div>', unsafe_allow_html=True)
+
+        labels = ["Water", "Protein", "Fat / Lipid", "Fixed Carbon",
+                  "Other Organics", "Carbohydrates", "Ash"]
+        values = [WATER*100, PRT*100, FAT*100, FC*100,
+                  OTH*100, CBH*100, ASH*100]
+        colors = ["#D3D1C7", "#378ADD", "#1D9E75", "#7F77DD",
+                  "#D4537E", "#D85A30", "#BA7517"]
+
+        fig, ax = plt.subplots(figsize=(5, 4))
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
+        wedges, _ = ax.pie(
+            values, labels=None, colors=colors,
+            startangle=90, counterclock=False,
+            wedgeprops=dict(width=0.5, edgecolor="white", linewidth=1.5)
+        )
+        legend_labels = [f"{l}: {v:.2f}%" for l, v in zip(labels, values)]
+        ax.legend(wedges, legend_labels,
+                  loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
+                  fontsize=8, frameon=False)
+        plt.tight_layout()
+        st.pyplot(fig, use_container_width=True)
+        plt.close()
+
     st.session_state["composition"] = {
         "WATER": WATER, "CBH": CBH, "PRT": PRT, "FAT": FAT,
         "OTH": OTH, "ASH": ASH, "FIXED_CARBON": FC,
     }
     st.session_state["Qf"]   = Qf
     st.session_state["Tann"] = Tann
- 
- 
+    st.session_state["selected_waste"] = selected_waste
+
+
 # ============================================================
-# TAB 3 — ECONOMIC PARAMETERS
+# TAB 3 - TECHNOLOGY SPECIFICATIONS
 # ============================================================
 with tab3:
-    st.markdown('<div class="section-header">Operating Cost Parameters</div>',
-                unsafe_allow_html=True)
- 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        C_elec = st.number_input("Electricity cost ($/kWh)", 0.01, 1.0,
-                                 0.10, step=0.01, format="%.3f")
-        C_tip  = st.number_input("Tipping fee ($/kg)", 0.0, 0.5,
-                                 0.08, step=0.005, format="%.3f",
-                                 help="Revenue received per kg of food waste processed")
-    with col2:
-        C_lbr  = st.number_input("Labor cost ($/hr)", 10.0, 100.0,
-                                 30.0, step=1.0)
-        CRF    = st.number_input("Capital recovery factor", 0.05, 0.30,
-                                 0.11, step=0.01, format="%.3f",
-                                 help="CRF = i(1+i)^n / ((1+i)^n - 1)")
-    with col3:
-        st.markdown("**CRF Guide**")
-        st.caption("10 yr @ 10%: 0.163")
-        st.caption("15 yr @ 10%: 0.131")
-        st.caption("20 yr @ 10%: 0.117")
-        st.caption("20 yr @ 8%:  0.102")
- 
-    st.markdown('<div class="section-header">Product Selling Prices</div>',
-                unsafe_allow_html=True)
- 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        price_CH4         = st.number_input("Biomethane CH4 ($/kg)",
-                                            0.0, 2.0, 0.185, step=0.01)
-        price_BIOCRUDE    = st.number_input("Biocrude ($/kg)",
-                                            0.0, 2.0, 0.48, step=0.01)
-    with col2:
-        price_COMPOST     = st.number_input("Compost ($/kg)",
-                                            0.0, 0.5, 0.068, step=0.005)
-        price_ELECTRICITY = st.number_input("Electricity ($/kWh)",
-                                            0.0, 0.5, 0.10, step=0.01)
-    with col3:
-        price_BIOSOLIDS   = st.number_input("Biosolids ($/kg)",
-                                            0.0, 0.5, 0.05, step=0.005)
- 
-    st.markdown('<div class="section-header">Solver Settings</div>',
-                unsafe_allow_html=True)
- 
-    col1, col2 = st.columns(2)
-    with col1:
-        n_pareto = st.slider("Number of Pareto points", 3, 20, 10, step=1)
-        time_lim = st.number_input("Time limit per point (seconds)",
-                                   60, 1800, 300, step=60)
-    with col2:
-        gap = st.number_input("Optimality gap (%)", 0.5, 10.0, 2.0, step=0.5)
-        st.caption(f"Estimated runtime: ~{n_pareto * time_lim // 60} minutes")
- 
-    # Store in session state
+    st.markdown("Select a technology to review and adjust its default parameters.")
+
+    tech_options = [
+        "Hydrothermal Liquefaction",
+        "Anaerobic Digestion",
+        "Aerobic Biodigestion",
+        "Enzymatic Hydrolysis",
+        "Composting",
+        "Wastewater Treatment",
+        "Sanitary Landfill",
+        "Incineration",
+        "Shredding",
+        "Maceration",
+        "Centrifugation",
+        "Filtration",
+        "Amine Scrubbing",
+        "Pressure Swing Adsorption",
+        "Steam Turbine",
+    ]
+
+    selected_tech = st.selectbox(
+        "Select Technology", tech_options, index=0,
+        label_visibility="collapsed"
+    )
+
+    st.markdown("---")
+
+    if selected_tech == "Hydrothermal Liquefaction":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Product Yield Fractions")
+            yBIOCRUDE = st.number_input("Biocrude yield",      0.0, 1.0, 0.35, 0.01, format="%.3f")
+            yCHAR     = st.number_input("Char yield",          0.0, 1.0, 0.10, 0.01, format="%.3f")
+            yAQ       = st.number_input("Aqueous phase yield", 0.0, 1.0, 0.40, 0.01, format="%.3f")
+            yGAS      = st.number_input("Gas product yield",   0.0, 1.0, 0.15, 0.01, format="%.3f")
+            total_htl = yBIOCRUDE + yCHAR + yAQ + yGAS
+            st.text_input("Sum of yield fractions", value=f"{total_htl:.3f}", disabled=True)
+        with col2:
+            section_header("Operating Conditions")
+            T_HTL     = st.number_input("Reaction temperature [C]", 200.0, 400.0, 340.0, 5.0)
+            theta_HTL = st.number_input("Residence time [min]",       10.0, 120.0,  60.0, 5.0)
+            rDry_HTL  = st.number_input("Dry solid loading [%]",       1.0,  30.0,   7.0, 0.5)
+        st.session_state["htl_params"] = {
+            "yBIOCRUDE": yBIOCRUDE, "yCHAR": yCHAR, "yAQ": yAQ, "yGAS": yGAS,
+            "T_HTL": T_HTL, "theta_HTL": theta_HTL, "rDry_HTL": rDry_HTL,
+        }
+
+    elif selected_tech == "Anaerobic Digestion":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Biogas Production")
+            BMP_scen    = st.number_input("Biochemical methane potential [mL CH4/g VS]", 0.0, 2000.0, 802.91, 10.0)
+            eta_cap_AND = st.number_input("Biogas capture efficiency",  0.0, 1.0, 0.98, 0.01, format="%.2f")
+            eta_OTH_AND = st.number_input("Other organics degradation", 0.0, 1.0, 0.30, 0.01, format="%.2f")
+        with col2:
+            section_header("Operating Conditions")
+            theta_AND   = st.number_input("Hydraulic retention time [hr]",       100.0, 1500.0, 720.0, 10.0)
+            OLR_AND     = st.number_input("Organic loading rate [kg VS/m3/day]",   0.5,   10.0,   2.5,  0.1)
+            epsilon_AND = st.number_input("Vessel fill fraction",                  0.0,    1.0,   0.85, 0.01, format="%.2f")
+        st.session_state["and_params"] = {
+            "BMP_scen": BMP_scen, "eta_cap_AND": eta_cap_AND,
+            "eta_OTH_AND": eta_OTH_AND, "theta_AND": theta_AND,
+            "epsilon_AND": epsilon_AND,
+        }
+
+    elif selected_tech == "Aerobic Biodigestion":
+        section_header("Component Degradation Fractions")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            fdeg_CBH = st.number_input("Carbohydrates", 0.0, 1.0, 0.40, 0.01, format="%.2f")
+        with c2:
+            fdeg_PRT = st.number_input("Protein",       0.0, 1.0, 0.30, 0.01, format="%.2f")
+        with c3:
+            fdeg_FAT = st.number_input("Fat / Lipid",   0.0, 1.0, 0.15, 0.01, format="%.2f")
+        with c4:
+            fdeg_OTH = st.number_input("Other organics",0.0, 1.0, 0.20, 0.01, format="%.2f")
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Operating Conditions")
+            theta_AER = st.number_input("Hydraulic retention time [hr]",        1.0, 100.0, 24.0, 1.0)
+            Rw_AER    = st.number_input("Water addition ratio [kg/kg dry feed]", 0.0,  10.0,  1.5, 0.1)
+        st.session_state["aer_params"] = {
+            "fdeg_CBH": fdeg_CBH, "fdeg_PRT": fdeg_PRT,
+            "fdeg_FAT": fdeg_FAT, "fdeg_OTH": fdeg_OTH,
+            "theta_AER": theta_AER, "Rw_AER": Rw_AER,
+        }
+
+    elif selected_tech == "Enzymatic Hydrolysis":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Hydrolysis Parameters")
+            eta_ENZ = st.number_input("Hydrolysis efficiency",                0.0, 1.0, 0.85, 0.01, format="%.2f")
+            r_enz   = st.number_input("Enzyme dose [kg enzyme/kg dry solids]", 0.0, 0.1, 0.02, 0.001, format="%.3f")
+            HRT_ENZ = st.number_input("Hydraulic retention time [hr]",         1.0, 24.0, 6.0, 0.5)
+        st.session_state["enz_params"] = {"eta_ENZ": eta_ENZ, "r_enz": r_enz, "HRT_ENZ": HRT_ENZ}
+
+    elif selected_tech == "Composting":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Degradation")
+            fdeg_CMP    = st.number_input("Volatile solids degradation fraction", 0.0, 1.0, 0.50, 0.01, format="%.2f")
+            eta_OTH_CMP = st.number_input("Other organics degradation",           0.0, 1.0, 0.60, 0.01, format="%.2f")
+            theta_CMP   = st.number_input("Composting time [hr]",                24.0, 500.0, 120.0, 10.0)
+        with col2:
+            section_header("Emission Factors")
+            EF_CH4_CMP = st.number_input("CH4 emission factor [kg/kg wet feed]", 0.0, 0.1,  0.0040,  0.0001, format="%.4f")
+            EF_N2O_CMP = st.number_input("N2O emission factor [kg/kg wet feed]", 0.0, 0.01, 0.00030, 0.00001, format="%.5f")
+        st.session_state["cmp_params"] = {
+            "fdeg_CMP": fdeg_CMP, "eta_OTH_CMP": eta_OTH_CMP, "theta_CMP": theta_CMP,
+        }
+
+    elif selected_tech == "Wastewater Treatment":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Treatment Parameters")
+            fBOD        = st.number_input("BOD fraction of volatile solids",      0.0,  2.0, 1.20, 0.01)
+            SRT_day     = st.number_input("Sludge retention time [days]",          1.0, 30.0, 10.0, 1.0)
+            X_MLSS      = st.number_input("Mixed liquor suspended solids [g/L]",   1.0, 10.0,  3.0, 0.1)
+        with col2:
+            section_header("Operating Conditions")
+            HRT_WWT_min = st.number_input("Minimum hydraulic retention time [hr]", 1.0, 24.0,  6.0, 0.5)
+        st.session_state["wwt_params"] = {
+            "fBOD": fBOD, "SRT_day": SRT_day, "X_MLSS": X_MLSS, "HRT_WWT_min": HRT_WWT_min,
+        }
+
+    elif selected_tech == "Sanitary Landfill":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Methane Generation")
+            DOC_value = st.number_input("Degradable organic carbon fraction", 0.0, 1.0, 0.358, 0.001, format="%.3f")
+            MCF_value = st.number_input("Methane correction factor",          0.0, 1.0, 0.60,  0.01,  format="%.2f")
+            F_value   = st.number_input("Fraction of CH4 in landfill gas",    0.0, 1.0, 0.576, 0.001, format="%.3f")
+        with col2:
+            section_header("Site Parameters")
+            CAP_SLF   = st.number_input("Gas capture efficiency", 0.0, 1.0,  0.65, 0.01, format="%.2f")
+            OX        = st.number_input("Oxidation factor",       0.0, 1.0,  0.10, 0.01, format="%.2f")
+            Depth_SLF = st.number_input("Landfill depth [m]",     1.0, 30.0, 10.0, 1.0)
+        st.session_state["slf_params"] = {
+            "DOC_value": DOC_value, "MCF_value": MCF_value, "F_value": F_value,
+            "CAP_SLF": CAP_SLF, "OX": OX, "Depth_SLF": Depth_SLF,
+        }
+
+    elif selected_tech == "Incineration":
+        section_header("Efficiency Parameters")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            eta_INC    = st.number_input("Combustion efficiency", 0.0, 1.0, 0.98, 0.01, format="%.2f")
+        with c2:
+            eta_boiler = st.number_input("Boiler efficiency",     0.0, 1.0, 0.80, 0.01, format="%.2f")
+        with c3:
+            eta_turb   = st.number_input("Turbine efficiency",    0.0, 1.0, 0.30, 0.01, format="%.2f")
+        st.session_state["inc_params"] = {
+            "eta_INC": eta_INC, "eta_boiler": eta_boiler, "eta_turb": eta_turb,
+        }
+
+    elif selected_tech == "Shredding":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Shredding Parameters")
+            eta_SHR = st.number_input("Shredding efficiency", 0.0, 1.0, 0.99, 0.01, format="%.2f")
+        st.session_state["shr_params"] = {"eta_SHR": eta_SHR}
+
+    elif selected_tech == "Maceration":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Maceration Parameters")
+            Rw_MCR = st.number_input("Water addition ratio [kg water/kg dry feed]", 0.0, 10.0, 2.0, 0.1)
+        st.session_state["mcr_params"] = {"Rw_MCR": Rw_MCR}
+
+    elif selected_tech == "Centrifugation":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Centrifugation Parameters")
+            st.markdown("Separates biocrude from the HTL aqueous phase and char.")
+            eta_CEN = st.number_input("Centrifuge separation efficiency", 0.0, 1.0, 0.95, 0.01, format="%.2f")
+        with col2:
+            section_header("Retention Factors (fixed)")
+            st.text_input("Biocrude retention",      value="0.95", disabled=True)
+            st.text_input("Char retention",          value="0.98", disabled=True)
+            st.text_input("Aqueous phase retention", value="0.10", disabled=True)
+        st.session_state["cen_params"] = {"eta_CEN": eta_CEN}
+
+    elif selected_tech == "Filtration":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Filtration Parameters")
+            st.markdown("Further separates char and solids from the biocrude stream.")
+            eta_FLT = st.number_input("Filtration efficiency", 0.0, 1.0, 0.98, 0.01, format="%.2f")
+        with col2:
+            section_header("Retention Factors (fixed)")
+            st.text_input("Biocrude pass-through", value="0.05", disabled=True)
+            st.text_input("Char retention",        value="0.98", disabled=True)
+            st.text_input("Aqueous retention",     value="0.10", disabled=True)
+        st.session_state["flt_params"] = {"eta_FLT": eta_FLT}
+
+    elif selected_tech == "Amine Scrubbing":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Amine Scrubbing Parameters")
+            eta_ABS = st.number_input("CO2 removal efficiency",             0.0, 1.0, 0.95, 0.01, format="%.2f")
+            r_amine = st.number_input("Amine circulation rate [kg/m3 gas]", 0.0, 5.0, 0.30, 0.01)
+        with col2:
+            section_header("Operating Conditions")
+            T_ABS   = st.number_input("Absorption temperature [C]",   20.0,  60.0,  40.0, 1.0)
+            T_regen = st.number_input("Regeneration temperature [C]",  80.0, 140.0, 120.0, 5.0)
+        st.session_state["abs_params"] = {
+            "eta_ABS": eta_ABS, "r_amine": r_amine, "T_ABS": T_ABS, "T_regen": T_regen,
+        }
+
+    elif selected_tech == "Pressure Swing Adsorption":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("PSA Parameters")
+            eta_PSA    = st.number_input("CH4 recovery efficiency", 0.0, 1.0, 0.92, 0.01, format="%.2f")
+            purity_PSA = st.number_input("Biomethane purity [%]",  90.0, 100.0, 97.0, 0.5)
+        with col2:
+            section_header("Operating Conditions")
+            P_ads = st.number_input("Adsorption pressure [bar]",  1.0, 20.0, 7.0, 0.5)
+            P_des = st.number_input("Desorption pressure [bar]",  0.01, 2.0, 0.1, 0.01)
+        st.session_state["psa_params"] = {
+            "eta_PSA": eta_PSA, "purity_PSA": purity_PSA, "P_ads": P_ads, "P_des": P_des,
+        }
+
+    elif selected_tech == "Steam Turbine":
+        col1, col2 = st.columns(2)
+        with col1:
+            section_header("Steam Turbine Parameters")
+            eta_turb_STB = st.number_input("Turbine isentropic efficiency", 0.0, 1.0, 0.30, 0.01, format="%.2f")
+            eta_boil_STB = st.number_input("Boiler efficiency",             0.0, 1.0, 0.80, 0.01, format="%.2f")
+            eta_mech_STB = st.number_input("Mechanical efficiency",         0.0, 1.0, 0.95, 0.01, format="%.2f")
+        with col2:
+            section_header("Operating Conditions")
+            P_steam_STB = st.number_input("Steam pressure [bar]",   1.0, 100.0, 40.0, 1.0)
+            T_steam_STB = st.number_input("Steam temperature [C]", 100.0, 500.0, 350.0, 10.0)
+        st.session_state["stb_params"] = {
+            "eta_turb_STB": eta_turb_STB, "eta_boil_STB": eta_boil_STB, "eta_mech_STB": eta_mech_STB,
+        }
+
+    st.session_state["feed_params"] = {
+        "BMP_scen": st.session_state.get("and_params", {}).get("BMP_scen", 802.91),
+        "fdeg_CMP": st.session_state.get("cmp_params", {}).get("fdeg_CMP", 0.50),
+        "C_frac": 0.4327, "H_frac": 0.0605, "O_frac": 0.4289,
+        "N_frac": 0.0717, "S_frac": 0.0062,
+    }
+
+
+# ============================================================
+# TAB 4 - COST SPECIFICATIONS
+# ============================================================
+with tab4:
+    col_left4, col_right4 = st.columns([1, 1])
+
+    with col_left4:
+        section_header("Economic Parameters")
+        C_elec = st.number_input("Electricity cost [$/kWh]", 0.01, 1.0, 0.10, 0.01, format="%.3f")
+        C_tip  = st.number_input("Tipping fee [$/kg]",       0.0,  0.5, 0.08, 0.005, format="%.3f")
+        C_lbr  = st.number_input("Labor cost [$/hr]",        10.0, 100.0, 30.0, 1.0)
+
+        section_header("Capital Recovery Factor")
+        col_lt, col_dr = st.columns(2)
+        with col_lt:
+            plant_life = st.number_input("Plant lifetime [years]", 5, 40, 20, 1)
+        with col_dr:
+            discount_r = st.number_input("Discount rate [%]", 1.0, 20.0, 7.0, 0.5, format="%.1f")
+        r   = discount_r / 100.0
+        CRF = (r * (1 + r) ** plant_life) / ((1 + r) ** plant_life - 1)
+        st.text_input("Capital recovery factor (CRF)", value=f"{CRF:.4f}", disabled=True)
+
+        section_header("Product Selling Prices")
+        price_CH4         = st.number_input("Biomethane [$/kg]",   0.0, 2.0, 0.185, 0.01)
+        price_BIOCRUDE    = st.number_input("Biocrude [$/kg]",     0.0, 2.0, 0.48,  0.01)
+        price_COMPOST     = st.number_input("Compost [$/kg]",      0.0, 0.5, 0.068, 0.005)
+        price_ELECTRICITY = st.number_input("Electricity [$/kWh]", 0.0, 0.5, 0.10,  0.01)
+        price_BIOSOLIDS   = st.number_input("Biosolids [$/kg]",    0.0, 0.5, 0.05,  0.005)
+
+    with col_right4:
+        section_header("Solver Settings")
+        n_pareto = st.slider(
+            "Trade-off Resolution (Pareto points)", 3, 20, 10, 1,
+            help="More points = finer trade-off curve but longer runtime"
+        )
+        time_lim = st.number_input(
+            "Time limit per point [seconds]", 60, 1800, 300, 60,
+            help="Higher = more accurate solution but slower"
+        )
+        gap = st.number_input(
+            "Optimality gap [%]", 0.5, 10.0, 2.0, 0.5,
+            help="Lower = closer to global optimum but slower"
+        )
+
+        section_header("Input Summary")
+        comp_ss  = st.session_state.get("composition", {})
+        htl_p    = st.session_state.get("htl_params", {})
+        and_p    = st.session_state.get("and_params", {})
+        waste    = st.session_state.get("selected_waste", "Not selected")
+        Qf_val   = st.session_state.get("Qf",   1000)
+        Tann_val = st.session_state.get("Tann", 7920)
+        VS_val   = (
+            comp_ss.get("CBH", 0) + comp_ss.get("PRT", 0) +
+            comp_ss.get("FAT", 0) + comp_ss.get("OTH", 0)
+        ) * 100
+
+        st.dataframe(
+            pd.DataFrame({
+                "Parameter": [
+                    "Waste type", "Feed rate [kg/hr]", "Operating hours [hr/yr]",
+                    "Moisture [%]", "Volatile solids [%]", "HTL biocrude yield",
+                    "AND BMP [mL/g VS]", "Electricity cost [$/kWh]",
+                    "Tipping fee [$/kg]", "CRF", "Pareto points",
+                ],
+                "Value": [
+                    waste, f"{Qf_val:.1f}", f"{Tann_val:.0f}",
+                    f"{comp_ss.get('WATER', 0)*100:.2f}", f"{VS_val:.2f}",
+                    f"{htl_p.get('yBIOCRUDE', 0.35):.3f}",
+                    f"{and_p.get('BMP_scen', 802.91):.2f}",
+                    f"{C_elec:.3f}", f"{C_tip:.3f}", f"{CRF:.4f}", str(n_pareto),
+                ]
+            }),
+            use_container_width=True, hide_index=True, height=390
+        )
+
     st.session_state["econ"] = {
         "C_elec": C_elec, "C_tip": C_tip, "C_lbr": C_lbr, "CRF": CRF,
         "price_CH4": price_CH4, "price_BIOCRUDE": price_BIOCRUDE,
         "price_COMPOST": price_COMPOST, "price_ELECTRICITY": price_ELECTRICITY,
         "price_BIOSOLIDS": price_BIOSOLIDS,
-        "n_pareto_pts": n_pareto,
-        "time_limit": time_lim,
-        "gap": gap / 100.0,
+        "n_pareto_pts": n_pareto, "time_limit": time_lim, "gap": gap / 100.0,
     }
- 
- 
+
+
 # ============================================================
-# TAB 4 — RUN OPTIMIZATION
+# TAB 5 - RESULTS
 # ============================================================
-with tab4:
-    st.markdown('<div class="section-header">Ready to Optimize</div>',
-                unsafe_allow_html=True)
- 
-    # Show summary of inputs
-    comp_ss = st.session_state.get("composition", {})
-    econ_ss = st.session_state.get("econ", {})
- 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Feed Summary**")
-        st.write(f"- Feed rate: {st.session_state.get('Qf', 1000)} kg/hr")
-        st.write(f"- Operating hours: {st.session_state.get('Tann', 7920)} hr/yr")
-        st.write(f"- Waste type: {selected_waste}")
-        if comp_ss:
-            st.write(f"- Moisture: {comp_ss.get('WATER', 0)*100:.1f}%")
-            st.write(f"- Protein: {comp_ss.get('PRT', 0)*100:.1f}%")
-            st.write(f"- Fat: {comp_ss.get('FAT', 0)*100:.1f}%")
- 
-    with col2:
-        st.markdown("**Economic Summary**")
-        if econ_ss:
-            st.write(f"- Electricity: ${econ_ss.get('C_elec', 0.1)}/kWh")
-            st.write(f"- Tipping fee: ${econ_ss.get('C_tip', 0.08)}/kg")
-            st.write(f"- Labor: ${econ_ss.get('C_lbr', 30)}/hr")
-            st.write(f"- CRF: {econ_ss.get('CRF', 0.11)}")
-            st.write(f"- Pareto points: {econ_ss.get('n_pareto_pts', 10)}")
- 
-    st.markdown(
-        '<div class="warning-box">⚠️ The optimization may take '
-        '<strong>20–50 minutes</strong> depending on solver settings. '
-        'Do not close this window while running.</div>',
-        unsafe_allow_html=True
+with tab5:
+    section_header("Select Optimization Objective")
+    st.markdown("")
+
+    selected_obj = st.radio(
+        "Optimization objective",
+        options=[
+            "Lowest Cost Pathway",
+            "Lowest Emissions Pathway",
+            "Lowest Cost & Emissions Pathway",
+        ],
+        index=2,
+        label_visibility="collapsed",
+        horizontal=True,
     )
- 
-    if st.button("🚀 Run Optimization", type="primary", use_container_width=True):
- 
-        # Validate composition
+
+    st.markdown("")
+    col_run = st.columns([3, 1, 3])
+    with col_run[1]:
+        run_clicked = st.button("Run Optimization", key="run_btn")
+
+    if run_clicked:
         comp_val = st.session_state.get("composition", {})
         valid, msg = validate_composition(comp_val)
         if not valid:
@@ -385,181 +785,344 @@ with tab4:
                 "Qf":          st.session_state.get("Qf", 1000),
                 "Tann":        st.session_state.get("Tann", 7920),
                 "composition": comp_val,
+                "objective":   selected_obj,
                 **st.session_state.get("econ", {}),
+                **st.session_state.get("feed_params", {}),
             }
- 
-            with st.spinner("Running optimization... This may take a while."):
-                result = run_optimization(user_inputs)
- 
-            if result["status"] == "success":
-                st.session_state["result"] = result
-                st.success(f"✅ {result['message']}")
-                st.balloons()
-            else:
-                st.error(f"❌ Optimization failed: {result['message']}")
- 
- 
-# ============================================================
-# TAB 5 — PARETO FRONT
-# ============================================================
-with tab5:
-    st.markdown('<div class="section-header">Pareto Front Results</div>',
-                unsafe_allow_html=True)
- 
-    result = st.session_state.get("result", None)
- 
+            with st.spinner("Optimization running in background... checking every 5 seconds."):
+                try:
+                    r = requests.post("http://localhost:8000/optimize", json=user_inputs, timeout=10)
+                    job_id = r.json()["job_id"]
+                    data = {"status": "running"}
+                    while data["status"] not in ["complete", "error"]:
+                        time.sleep(5)
+                        status_r = requests.get(f"http://localhost:8000/status/{job_id}", timeout=10)
+                        data = status_r.json()
+                    if data["status"] == "complete":
+                        data["pareto_df"] = pd.DataFrame(data["pareto_df"])
+                        st.session_state["result"] = data
+                        st.session_state["result_objective"] = selected_obj
+                        st.success("Optimization complete!")
+                    else:
+                        st.error(f"Optimization failed: {data['message']}")
+                except Exception as e:
+                    st.error(f"Could not connect to optimization server: {e}. Make sure uvicorn api:app --port 8000 is running.")
+
+    st.markdown("---")
+
+    result     = st.session_state.get("result", None)
+    result_obj = st.session_state.get("result_objective", "Lowest Cost & Emissions Pathway")
+
     if result is None:
-        st.info("Run the optimization first in the **Run Optimization** tab.")
+        st.info("Select an objective above and click Run Optimization to see results.")
     else:
-        df = result["pareto_df"]
+        df       = result["pareto_df"]
         feasible = df[df["NAC"].notna()].copy()
- 
-        if feasible.empty:
-            st.warning("No feasible Pareto points found.")
+
+        # Pick best row based on objective
+        if result_obj == "Lowest Cost Pathway":
+            best = feasible.loc[feasible["NAC"].idxmin()]
+        elif result_obj == "Lowest Emissions Pathway":
+            best = feasible.loc[feasible["GHG"].idxmin()]
         else:
-            # Key metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Min NAC", f"{result['NAC_min']:.3f} M$/yr",
-                          help="Minimum Net Annual Cost")
-            with col2:
-                st.metric("Min GHG", f"{result['GHG_min']:.0f} t CO2-eq/yr",
-                          help="Minimum GHG emissions")
-            with col3:
-                st.metric("Feasible points", len(feasible))
- 
-            # Pareto plot
-            fig, ax = plt.subplots(figsize=(10, 6))
- 
-            color_map = {
-                "HTL": "#7F77DD", "AND": "#1D9E75", "CMP": "#D4537E",
-                "WWT": "#378ADD", "SLF": "#D85A30", "INC": "#BA7517",
-            }
- 
-            for _, row in feasible.iterrows():
-                color = color_map.get(row["Conv"], "#999999")
-                ax.scatter(row["NAC"], row["GHG"],
-                           color=color, s=120, zorder=5,
-                           edgecolors="white", linewidth=1.5)
-                ax.annotate(row["Pareto_pt"],
-                            (row["NAC"], row["GHG"]),
-                            textcoords="offset points",
-                            xytext=(6, 4), fontsize=8)
- 
-            # Connect Pareto points
-            sorted_f = feasible.sort_values("NAC")
-            ax.plot(sorted_f["NAC"], sorted_f["GHG"],
-                    "k--", linewidth=1, alpha=0.4, zorder=1)
- 
-            # Legend
-            patches = [mpatches.Patch(color=c, label=t)
-                       for t, c in color_map.items()]
-            ax.legend(handles=patches, title="Conversion Tech",
-                      loc="upper right", fontsize=9)
- 
-            ax.set_xlabel("Net Annual Cost (M$/yr)", fontsize=12)
-            ax.set_ylabel("GHG Emissions (t CO2-eq/yr)", fontsize=12)
-            ax.set_title("Pareto Front — Cost vs GHG Emissions", fontsize=13)
-            ax.axhline(0, color="gray", linewidth=0.5, linestyle=":")
-            ax.grid(True, alpha=0.3)
+            best = feasible.iloc[0]
+
+        conv_map = {
+            "HTL": "Hydrothermal Liquefaction", "AND": "Anaerobic Digestion",
+            "CMP": "Composting",                "WWT": "Wastewater Treatment",
+            "SLF": "Sanitary Landfill",         "INC": "Incineration",
+        }
+        bio_map  = {"AER": "Aerobic Biodigestion", "ENZ": "Enzymatic Hydrolysis"}
+        mech_map = {"SHR": "Shredding", "MCR": "Maceration"}
+
+        def is_selected(val):
+            return str(val) not in ["-", "0", "nan", "None", "BYP_bio", "BYP1", "BYP2"] and val is not None
+
+        econ      = st.session_state.get("econ", {})
+        Qf_v      = st.session_state.get("Qf",   1000)
+        Tann_v    = st.session_state.get("Tann", 7920)
+        comp_ss   = st.session_state.get("composition", {})
+        conv_tech = str(best.get("Conv", ""))
+        gasupg    = str(best.get("GasUpg", ""))
+        stb_tech  = str(best.get("STB", ""))
+        feed_tpy  = Qf_v * Tann_v / 1000
+
+        # ── Product rows ──────────────────────────────────────
+        product_rows = []
+
+        if conv_tech == "HTL":
+            htl_p     = st.session_state.get("htl_params", {})
+            yBIOCRUDE = htl_p.get("yBIOCRUDE", 0.35)
+            DS        = 1 - comp_ss.get("WATER", 0)
+            bc_tpy    = feed_tpy * DS * yBIOCRUDE
+            price_bc  = econ.get("price_BIOCRUDE", 0.48)
+            product_rows.append({
+                "Product":               "Biocrude",
+                "Output [t/yr]":         f"{bc_tpy:.1f}",
+                "Market price [$/kg]":   f"{price_bc:.3f}",
+                "Total revenue [M$/yr]": f"{bc_tpy * 1000 * price_bc / 1e6:.4f}",
+            })
+
+        if conv_tech == "AND" or gasupg in ["ABS", "PSA"]:
+            and_p     = st.session_state.get("and_params", {})
+            BMP       = and_p.get("BMP_scen", 802.91)
+            VS        = (comp_ss.get("CBH",0) + comp_ss.get("PRT",0) +
+                         comp_ss.get("FAT",0) + comp_ss.get("OTH",0))
+            ch4_tpy   = feed_tpy * VS * BMP * 0.000716
+            price_ch4 = econ.get("price_CH4", 0.185)
+            product_rows.append({
+                "Product":               "Biomethane",
+                "Output [t/yr]":         f"{ch4_tpy:.1f}",
+                "Market price [$/kg]":   f"{price_ch4:.3f}",
+                "Total revenue [M$/yr]": f"{ch4_tpy * 1000 * price_ch4 / 1e6:.4f}",
+            })
+
+        if conv_tech == "CMP":
+            cmp_p     = st.session_state.get("cmp_params", {})
+            fdeg      = cmp_p.get("fdeg_CMP", 0.50)
+            VS        = (comp_ss.get("CBH",0) + comp_ss.get("PRT",0) +
+                         comp_ss.get("FAT",0) + comp_ss.get("OTH",0))
+            cmp_tpy   = feed_tpy * VS * (1 - fdeg)
+            price_cmp = econ.get("price_COMPOST", 0.068)
+            product_rows.append({
+                "Product":               "Compost",
+                "Output [t/yr]":         f"{cmp_tpy:.1f}",
+                "Market price [$/kg]":   f"{price_cmp:.3f}",
+                "Total revenue [M$/yr]": f"{cmp_tpy * 1000 * price_cmp / 1e6:.4f}",
+            })
+
+        if conv_tech == "WWT":
+            VS       = (comp_ss.get("CBH",0) + comp_ss.get("PRT",0) +
+                        comp_ss.get("FAT",0) + comp_ss.get("OTH",0))
+            bs_tpy   = feed_tpy * VS * 0.20
+            price_bs = econ.get("price_BIOSOLIDS", 0.05)
+            product_rows.append({
+                "Product":               "Biosolids",
+                "Output [t/yr]":         f"{bs_tpy:.1f}",
+                "Market price [$/kg]":   f"{price_bs:.3f}",
+                "Total revenue [M$/yr]": f"{bs_tpy * 1000 * price_bs / 1e6:.4f}",
+            })
+
+        if conv_tech == "INC" or is_selected(stb_tech):
+            elec_mwh   = feed_tpy * 15.0 * 0.30 / 3.6
+            price_elec = econ.get("price_ELECTRICITY", 0.10)
+            product_rows.append({
+                "Product":               "Electricity",
+                "Output [t/yr]":         f"{elec_mwh:.1f} MWh/yr",
+                "Market price [$/kg]":   f"{price_elec:.3f} /kWh",
+                "Total revenue [M$/yr]": f"{elec_mwh * 1000 * price_elec / 1e6:.4f}",
+            })
+
+        # ── Columns ───────────────────────────────────────────
+        col_left5, col_right5 = st.columns(2)
+
+        with col_left5:
+            section_header("Technologies in Optimal Pathway")
+            tech_rows = [
+                {
+                    "Stage":      "Pretreatment (mechanical)",
+                    "Technology": mech_map.get(str(best.get("Mech","")), "—"),
+                    "Selected":   "Yes" if is_selected(best.get("Mech","")) else "No",
+                },
+                {
+                    "Stage":      "Pretreatment (biological)",
+                    "Technology": bio_map.get(str(best.get("Bio","")), "—"),
+                    "Selected":   "Yes" if is_selected(best.get("Bio","")) else "No",
+                },
+                {
+                    "Stage":      "Conversion",
+                    "Technology": conv_map.get(conv_tech, conv_tech),
+                    "Selected":   "Yes",
+                },
+                {
+                    "Stage":      "Gas upgrading",
+                    "Technology": "Amine Scrubbing" if gasupg == "ABS" else
+                                  "Pressure Swing Adsorption" if gasupg == "PSA" else "—",
+                    "Selected":   "Yes" if is_selected(gasupg) else "No",
+                },
+                {
+                    "Stage":      "HTL liquid recovery",
+                    "Technology": "Centrifugation" if str(best.get("HTLrec","")) == "CEN" else
+                                  "Filtration" if str(best.get("HTLrec","")) == "FLT" else "—",
+                    "Selected":   "Yes" if is_selected(best.get("HTLrec","")) else "No",
+                },
+                {
+                    "Stage":      "Steam turbine",
+                    "Technology": "Steam Turbine" if is_selected(stb_tech) else "—",
+                    "Selected":   "Yes" if is_selected(stb_tech) else "No",
+                },
+            ]
+            st.dataframe(pd.DataFrame(tech_rows), use_container_width=True,
+                         hide_index=True, height=245)
+
+            section_header("Product Outputs")
+            if product_rows:
+                st.dataframe(pd.DataFrame(product_rows), use_container_width=True,
+                             hide_index=True, height=int(45 + len(product_rows) * 35))
+            else:
+                st.info("No marketable products identified for this pathway.")
+
+        with col_right5:
+            section_header("Cost breakdown")
+            cost_labels = ["Capital","Working\nCapital","Insurance",
+                           "Utilities","Labor","Overhead","Raw\nMaterials","Disposal"]
+            cost_cols   = ["CCAC","CCWC","CCINS","CCUC","CCLB","CCOC","CCRM","CDISP"]
+            cost_colors = ["#4878CF","#6ACC65","#D65F5F","#B47CC7",
+                           "#C4AD66","#77BEDB","#F0A500","#A9A9A9"]
+            cost_vals   = [float(best.get(c, 0) or 0) for c in cost_cols]
+
+            fig1, ax1 = plt.subplots(figsize=(5, 2.8))
+            fig1.patch.set_facecolor("white")
+            ax1.set_facecolor("white")
+            ax1.bar(cost_labels, cost_vals, color=cost_colors,
+                    edgecolor="white", linewidth=0.5)
+            ax1.set_ylabel("Cost [M$/yr]", fontsize=9)
+            ax1.tick_params(axis='x', labelsize=7)
+            ax1.grid(True, alpha=0.2, axis="y", linestyle="--")
+            ax1.spines["top"].set_visible(False)
+            ax1.spines["right"].set_visible(False)
             plt.tight_layout()
-            st.pyplot(fig)
+            st.pyplot(fig1)
             plt.close()
- 
-            # Results table
-            st.markdown('<div class="section-header">Pareto Results Table</div>',
-                        unsafe_allow_html=True)
-            st.dataframe(
-                feasible[[
-                    "Pareto_pt", "Conv", "Bio", "Mech",
-                    "HTLrec", "GasUpg", "STB", "NAC", "GHG", "Status"
-                ]].reset_index(drop=True),
-                use_container_width=True
-            )
- 
-            # Download
-            csv = df.to_csv(index=False)
-            st.download_button("⬇️ Download Full Results CSV",
-                               csv, "pareto_results.csv", "text/csv")
- 
- 
+
+            section_header("Revenue breakdown")
+            price_tip = econ.get("C_tip", 0.08)
+            rev_tip   = feed_tpy * 1000 * price_tip / 1e6
+            total_rev = float(best.get("REV", 0) or 0)
+            prod_rev  = max(0, total_rev - rev_tip)
+
+            fig2, ax2 = plt.subplots(figsize=(5, 2.8))
+            fig2.patch.set_facecolor("white")
+            ax2.set_facecolor("white")
+            ax2.bar(["Tipping fee", "Product\nrevenue", "Total\nrevenue"],
+                    [rev_tip, prod_rev, total_rev],
+                    color=["#2E8B57","#1D9E75","#378ADD"],
+                    edgecolor="white", linewidth=0.5)
+            ax2.set_ylabel("Revenue [M$/yr]", fontsize=9)
+            ax2.tick_params(axis='x', labelsize=8)
+            ax2.grid(True, alpha=0.2, axis="y", linestyle="--")
+            ax2.spines["top"].set_visible(False)
+            ax2.spines["right"].set_visible(False)
+            plt.tight_layout()
+            st.pyplot(fig2)
+            plt.close()
+
+        if result_obj == "Lowest Cost & Emissions Pathway":
+            st.markdown("---")
+            section_header("Pareto Front — All Trade-off Solutions")
+            if not feasible.empty:
+                color_map = {
+                    "HTL": "#7F77DD", "AND": "#1D9E75", "CMP": "#D4537E",
+                    "WWT": "#378ADD", "SLF": "#D85A30", "INC": "#BA7517",
+                }
+                fig_p, ax_p = plt.subplots(figsize=(10, 4))
+                fig_p.patch.set_facecolor("white")
+                ax_p.set_facecolor("white")
+                for _, row in feasible.iterrows():
+                    color = color_map.get(str(row["Conv"]), "#999999")
+                    ax_p.scatter(row["NAC"], row["GHG"], color=color, s=100,
+                                 zorder=5, edgecolors="black", linewidth=0.8)
+                    ax_p.annotate(str(row["Pareto_pt"]), (row["NAC"], row["GHG"]),
+                                  textcoords="offset points", xytext=(5, 3), fontsize=8)
+                sorted_f = feasible.sort_values("NAC")
+                ax_p.plot(sorted_f["NAC"], sorted_f["GHG"], "k--", linewidth=1, alpha=0.5)
+                patches = [mpatches.Patch(color=c, label=conv_map.get(t, t))
+                           for t, c in color_map.items()
+                           if t in feasible["Conv"].values]
+                ax_p.legend(handles=patches, title="Conversion technology", fontsize=9)
+                ax_p.set_xlabel("Net Annual Cost [M$/yr]", fontsize=10)
+                ax_p.set_ylabel("GHG Emissions [t CO2-eq/yr]", fontsize=10)
+                ax_p.grid(True, alpha=0.3, linestyle="--")
+                ax_p.spines["top"].set_visible(False)
+                ax_p.spines["right"].set_visible(False)
+                plt.tight_layout()
+                st.pyplot(fig_p)
+                plt.close()
+
+        st.markdown("---")
+        csv = df.to_csv(index=False)
+        st.download_button("Download Results CSV", csv, "pareto_results.csv", "text/csv")
+
+
 # ============================================================
-# TAB 6 — COST BREAKDOWN
+# TAB 6 - ENVIRONMENTAL JUSTICE
 # ============================================================
 with tab6:
-    st.markdown('<div class="section-header">Cost Breakdown</div>',
-                unsafe_allow_html=True)
- 
-    result = st.session_state.get("result", None)
- 
-    if result is None:
-        st.info("Run the optimization first in the **Run Optimization** tab.")
+    section_header("Environmental Justice Assessment")
+    st.markdown(
+        "Enter a facility zip code in the **Feed Inputs** tab to load the EPA EJScreen assessment."
+    )
+
+    zipcode           = st.session_state.get("zipcode")
+    selected_waste_ej = st.session_state.get("selected_waste", "Unknown")
+
+    if not zipcode:
+        st.info("Enter a facility zip code in the Feed Inputs tab to see the Environmental Justice assessment.")
     else:
-        df = result["pareto_df"]
-        feasible = df[df["NAC"].notna()].copy()
- 
-        if feasible.empty:
-            st.warning("No feasible points to display.")
-        else:
-            # Cost breakdown bar chart
-            cost_cols   = ["CCAC", "CCWC", "CCINS", "CCUC",
-                           "CCLB", "CCOC", "CCRM", "CDISP", "CTIP"]
-            cost_labels = ["Capital", "Working Capital", "Insurance",
-                           "Utilities", "Labor", "Overhead",
-                           "Raw Materials", "Disposal", "Tipping Fee"]
-            cost_colors = ["#4878CF", "#6ACC65", "#D65F5F", "#B47CC7",
-                           "#C4AD66", "#77BEDB", "#F0A500", "#A9A9A9", "#5A5A5A"]
- 
-            df_plot = feasible.drop_duplicates(
-                subset=["Conv", "NAC", "GHG"]
-            ).reset_index(drop=True)
- 
-            techs = [f"{r['Conv']}\n({r['GasUpg'] if r['GasUpg'] != '-' else r['HTLrec'] if r['HTLrec'] != '-' else 'direct'})"
-                     for _, r in df_plot.iterrows()]
- 
-            x      = np.arange(len(df_plot))
-            width  = 0.5
-            bottom = np.zeros(len(df_plot))
- 
-            fig, ax = plt.subplots(figsize=(12, 6))
- 
-            for col, label, color in zip(cost_cols, cost_labels, cost_colors):
-                vals = df_plot[col].fillna(0).to_numpy()
-                ax.bar(x, vals, width, bottom=bottom, label=label,
-                       color=color, edgecolor="white", linewidth=0.5)
-                bottom += vals
- 
-            # Revenue as negative bar
-            ax.bar(x, -df_plot["REV"].fillna(0).to_numpy(), width,
-                   label="Revenue", color="#2E8B57",
-                   edgecolor="white", linewidth=0.5, hatch="///")
- 
-            # NAC markers
-            for idx in range(len(df_plot)):
-                ax.scatter(idx, df_plot.loc[idx, "NAC"],
-                           color="black", zorder=5, s=60, marker="D")
- 
-            ax.set_xticks(x)
-            ax.set_xticklabels(techs, fontsize=9)
-            ax.set_ylabel("Cost (M$/yr)", fontsize=12)
-            ax.set_title("Annual Cost Breakdown by Conversion Technology",
-                         fontsize=12)
-            ax.legend(loc="upper left", fontsize=8, ncol=2, framealpha=0.9)
-            ax.axhline(0, color="black", linewidth=0.8)
-            ax.grid(True, alpha=0.2, axis="y", linestyle="--")
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
- 
-            # Cost table
-            st.markdown('<div class="section-header">Detailed Cost Table (M$/yr)</div>',
-                        unsafe_allow_html=True)
-            st.dataframe(
-                feasible[[
-                    "Pareto_pt", "Conv", "CCAC", "CCWC", "CCINS",
-                    "CCUC", "CCLB", "CCOC", "CCRM", "CDISP",
-                    "CTIP", "REV", "CCTC", "NAC"
-                ]].reset_index(drop=True),
-                use_container_width=True
+        with st.spinner(f"Fetching EPA EJScreen data for zip code {zipcode}..."):
+            ej_data = fetch_ejscreen(zipcode)
+
+        if ej_data is None:
+            st.warning(
+                f"Could not retrieve EJScreen data for zip code {zipcode}. "
+                "Please check the zip code and your internet connection."
             )
- 
+        else:
+            col_ej1, col_ej2, col_ej3 = st.columns(3)
+            with col_ej1:
+                st.markdown("**Community Profile**")
+                st.markdown(f"- Minority population: **{ej_data['pct_minority']:.1f}%**")
+                st.markdown(f"- Low-income population: **{ej_data['pct_lowincome']:.1f}%**")
+                st.markdown(f"- Less than high school education: **{ej_data['pct_less_hs']:.1f}%**")
+            with col_ej2:
+                st.markdown("**Environmental Burdens**")
+                st.markdown(f"- PM2.5 concentration: **{ej_data['pm25']:.2f} ug/m3**")
+                st.markdown(f"- Ozone level: **{ej_data['ozone']:.2f} ppb**")
+                st.markdown(f"- Diesel PM: **{ej_data['diesel_pm']:.4f}**")
+                st.markdown(f"- Proximity to Superfund sites: **{ej_data['superfund_prox']:.4f}**")
+            with col_ej3:
+                st.markdown("**EJ Risk Rating**")
+                pctile = ej_data.get("ej_pctile", 0)
+                st.markdown(
+                    f"EJScreen Percentile: **{pctile:.0f}th**  \n"
+                    f"Risk Level: {ej_risk_label(pctile)}",
+                    unsafe_allow_html=True
+                )
+                st.markdown(f"EJ Index Score: **{ej_data['ej_index']:.2f}**")
+
+            st.markdown("---")
+            st.markdown("**EJ Considerations for your waste type:**")
+
+            ej_context = {
+                "Mixed Restaurant / Cafeteria Waste": "Restaurant waste facilities in dense urban areas can increase truck traffic and odor in surrounding communities. Consider proximity to residential neighborhoods.",
+                "Fruit & Vegetable Waste": "Composting of fruit/vegetable waste may generate odors. Ensure the facility is not sited near schools or hospitals in high-EJ communities.",
+                "Meat & Fish Waste": "Meat and fish waste processing generates strong odors and wastewater. High EJ communities near such facilities face disproportionate burdens.",
+                "Bread & Bakery Waste": "Bakery waste is generally low-odor. Anaerobic digestion is preferred in high-EJ areas due to lower air quality impacts.",
+                "Dairy Waste": "Dairy waste can generate significant odor and methane. Ensure communities near the facility have been consulted.",
+                "Campus Dining Hall Waste": "Campus waste facilities serve a defined institution - community impacts are typically lower, but surrounding neighborhoods should still be considered.",
+                "Household Kitchen Waste": "Municipal food waste facilities serve the public - siting decisions should prioritize communities not already overburdened by waste infrastructure.",
+                "Municipal Solid Waste (Organic Fraction)": "Large-scale MSW facilities carry significant EJ implications. Community benefit agreements are strongly recommended.",
+            }
+            context_msg = ej_context.get(
+                selected_waste_ej,
+                "Consider the environmental justice implications of siting this facility, particularly regarding community consultation and burden distribution."
+            )
+            st.info(context_msg)
+
+            if pctile >= 80:
+                st.warning(
+                    "High EJ concern area. Technologies with lower air emissions such as "
+                    "Anaerobic Digestion and Composting are preferred over Incineration "
+                    "or Sanitary Landfill."
+                )
+            elif pctile >= 50:
+                st.warning(
+                    "Moderate EJ concern. Consider community engagement and monitoring programs. "
+                    "Prefer closed-loop technologies such as Anaerobic Digestion and HTL."
+                )
+            else:
+                st.success(
+                    "Lower EJ burden area. The facility area has relatively lower environmental "
+                    "justice concerns. Standard technology selection applies, but community "
+                    "engagement is still recommended."
+                )

@@ -26,7 +26,7 @@ FOOD_WASTE_DATABASE = {
 
     # ----------------------------------------------------------------
     # 1. MIXED RESTAURANT / CAFETERIA WASTE
-
+    # This is the BASE CASE in your model
     # Source: Ho & Chu (2018), validated against your model parameters
     # ----------------------------------------------------------------
     "Mixed Restaurant / Cafeteria Waste": {
