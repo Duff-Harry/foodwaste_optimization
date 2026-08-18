@@ -1,3 +1,220 @@
+"""
+app.py
+======
+ECO-FAST - Food Waste Processing Optimization Tool
+"""
+
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import numpy as np
+import base64
+import os
+import requests
+import time
+
+from food_waste_database import (
+    get_waste_types, get_composition, get_description,
+    get_references, get_HHV, validate_composition,
+)
+
+
+st.set_page_config(
+    page_title="ECO-FAST",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+
+st.markdown("""
+<style>
+    .stApp { background-color: #D4D0C8; }
+    header[data-testid="stHeader"] { display: none !important; }
+    .block-container { padding-top: 0rem !important; margin-top: 0rem !important; }
+    [data-testid="stAppViewContainer"] { padding-top: 0rem !important; }
+    [data-testid="stToolbar"] { display: none !important; }
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #D4D0C8;
+        border-bottom: 2px solid #808080;
+        gap: 0px; padding: 0px 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #D4D0C8;
+        border: 1px solid #808080;
+        border-bottom: none;
+        border-radius: 4px 4px 0 0;
+        padding: 6px 16px;
+        font-size: 13px;
+        color: #000000;
+        margin-right: 2px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #FFFFFF !important;
+        border-bottom: 2px solid #FFFFFF !important;
+        font-weight: bold;
+    }
+    .stTabs [data-baseweb="tab-panel"] {
+        background-color: #FFFFFF;
+        border: 1px solid #808080;
+        border-top: none;
+        padding: 16px;
+    }
+    .stButton button {
+        background-color: #D4D0C8 !important;
+        border: 2px solid #808080 !important;
+        border-radius: 3px !important;
+        color: #000000 !important;
+        font-size: 12px !important;
+        padding: 4px 12px !important;
+    }
+    .stButton button:hover { background-color: #BDB9B0 !important; }
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    .stNumberInput input:disabled,
+    .stTextInput input:disabled {
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+        opacity: 1 !important;
+        font-weight: 500 !important;
+    }
+    .stNumberInput label,
+    .stTextInput label,
+    .stSelectbox label,
+    .stSlider label {
+        color: #000000 !important;
+        opacity: 1 !important;
+        font-weight: 500 !important;
+    }
+    .stSelectbox div[data-baseweb="select"] {
+        color: #000000 !important;
+        opacity: 1 !important;
+    }
+    .ej-score-high { color: #CC0000; font-weight: bold; }
+    .ej-score-med  { color: #FF8800; font-weight: bold; }
+    .ej-score-low  { color: #2E8B57; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+def section_header(text, top=6, bottom=6):
+    st.markdown(
+        f'<div style="font-weight:bold; font-size:18px; color:#1a1a1a; '
+        f'padding-top:{top}px; padding-bottom:{bottom}px; '
+        f'line-height:1.6; overflow:visible;">{text}</div>',
+        unsafe_allow_html=True,
+    )
+
+def nav_buttons(save_key, tab_index, save_action=None):
+    pass
+
+def fetch_ejscreen(zipcode):
+    try:
+        geo_url = (
+            "https://geocoding.geo.census.gov/geocoder/locations/address"
+            f"?zip={zipcode}&benchmark=Public_AR_Current&format=json"
+        )
+        geo_r = requests.get(geo_url, timeout=10)
+        geo_data = geo_r.json()
+        matches = geo_data.get("result", {}).get("addressMatches", [])
+        if not matches:
+            return None
+        coords = matches[0]["coordinates"]
+        lat, lon = coords["y"], coords["x"]
+
+        fcc_url = (
+            f"https://geo.fcc.gov/api/census/block/find"
+            f"?latitude={lat}&longitude={lon}&format=json"
+        )
+        fcc_r = requests.get(fcc_url, timeout=10)
+        fcc_data = fcc_r.json()
+        fips = fcc_data.get("Block", {}).get("FIPS", "")
+        if not fips or len(fips) < 12:
+            return None
+        bg_fips = fips[:12]
+
+        arcgis_url = (
+            "https://ejscreen.epa.gov/arcgis/rest/services/ejscreen/"
+            "ejscreen_indexes_usa_2024_public/MapServer/0/query"
+            f"?where=ID='{bg_fips}'&outFields=*&f=json"
+        )
+        ej_r = requests.get(arcgis_url, timeout=15)
+        ej_data = ej_r.json()
+        features = ej_data.get("features", [])
+        if not features:
+            return None
+        attrs = features[0].get("attributes", {})
+
+        return {
+            "lat": lat, "lon": lon,
+            "pct_minority":   (attrs.get("MINORPCT",  0) or 0) * 100,
+            "pct_lowincome":  (attrs.get("LOWINCPCT", 0) or 0) * 100,
+            "pct_less_hs":    (attrs.get("LESSHSPCT", 0) or 0) * 100,
+            "pm25":           attrs.get("PM25",  0) or 0,
+            "ozone":          attrs.get("OZONE", 0) or 0,
+            "diesel_pm":      attrs.get("DSLPM", 0) or 0,
+            "superfund_prox": attrs.get("PNPL",  0) or 0,
+            "ej_index":       attrs.get("EJSCREEN_SCORE_2", 0) or 0,
+            "ej_pctile":      attrs.get("P_EJDX_D2", 0) or 0,
+        }
+    except Exception:
+        return None
+
+def ej_risk_label(pctile):
+    if pctile >= 80:
+        return '<span class="ej-score-high">HIGH</span>'
+    elif pctile >= 50:
+        return '<span class="ej-score-med">MODERATE</span>'
+    else:
+        return '<span class="ej-score-low">LOW</span>'
+
+
+# ============================================================
+# HEADER (called only after the user clicks "Get Started")
+# ============================================================
+def img_to_base64(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+def render_header():
+    try:
+        rowan_b64 = img_to_base64("rowan_logo.png")
+        njdep_b64 = img_to_base64("njdep_logo.png")
+        st.markdown(f"""
+        <div style="background-color:#D4D0C8; padding:1px 16px;
+                    display:flex; align-items:center; justify-content:space-between;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="background:#2E8B57; color:white; font-weight:900;
+                            font-size:24px; width:56px; height:56px;
+                            display:flex; align-items:center; justify-content:center;
+                            border-radius:12px; font-family:Arial; flex-shrink:0;">EF</div>
+                <div>
+                    <div style="font-size:24px; font-weight:bold;
+                                font-family:Arial; color:#000; line-height:1.2;">ECO-FAST</div>
+                    <div style="font-size:12px; font-family:Arial; color:#444;">
+                        Ecological Impact of Food Waste Recycle Effluent</div>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:1px;">
+                <img src="data:image/png;base64,{rowan_b64}"
+                     style="height:70px; width:135px; object-fit:contain;
+                            mix-blend-mode:multiply; background:transparent;">
+                <img src="data:image/png;base64,{njdep_b64}"
+                     style="height:70px; width:70px; object-fit:contain;
+                            mix-blend-mode:multiply; background:transparent;">
+            </div>
+        </div>
+        <hr style="margin:0; border-color:#808080;">
+        """, unsafe_allow_html=True)
+    except:
+        st.markdown("<hr style='margin:2px 0 0 0; border-color:#808080;'>",
+                    unsafe_allow_html=True)
+
+
 # ============================================================
 # LANDING SCREEN — shown first, standalone, full-bleed.
 # No header, no tab chrome. Click "Get Started" to reveal the app.
