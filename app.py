@@ -1112,7 +1112,7 @@ with tab5:
 # ============================================================
 with tab6:
 
-    CENSUS_API_KEY = "3d8f6af9980c901549cd2ba01f6ad14ffed8fa20"
+    CENSUS_API_KEY = st.secrets["CENSUS_API_KEY"]
 
     section_header("Environmental Justice Assessment")
     st.markdown(
