@@ -213,6 +213,111 @@ except:
     st.markdown("<hr style='margin:2px 0 0 0; border-color:#808080;'>",
                 unsafe_allow_html=True)
 
+
+# ============================================================
+# LANDING SCREEN — shown first, before the tabs.
+# Click "Get Started" to reveal the app.
+# ============================================================
+if "app_started" not in st.session_state:
+    st.session_state["app_started"] = False
+
+def _hero_bg_base64(path="Foodwaste_1.png"):
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except FileNotFoundError:
+        return None
+
+if not st.session_state["app_started"]:
+
+    _bg = _hero_bg_base64()
+    _bg_css = f"url('data:image/png;base64,{_bg}')" if _bg else "none"
+
+    st.markdown(f"""
+    <style>
+      .ef-landing {{
+        position: relative;
+        margin: -1rem -1rem 0 -1rem;
+        min-height: 78vh;
+        display: flex; flex-direction: column; justify-content: center;
+        padding: 60px 60px;
+        background:
+          linear-gradient(180deg, rgba(20,31,23,0.90) 0%, rgba(20,31,23,0.85) 55%, rgba(20,31,23,0.92) 100%),
+          {_bg_css} center 32% / cover no-repeat;
+        color: #F1EDE4;
+      }}
+      .ef-eyebrow {{
+        font-family: 'Courier New', monospace;
+        font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: #E0A438; margin-bottom: 18px;
+      }}
+      .ef-landing h1 {{
+        font-size: 44px; font-weight: 800; line-height: 1.12;
+        margin: 0 0 20px; max-width: 720px; color: #F1EDE4;
+      }}
+      .ef-landing h1 span {{ color: #8FBF3F; }}
+      .ef-landing p {{
+        font-size: 17px; line-height: 1.55; color: rgba(241,237,228,0.85);
+        max-width: 560px; margin: 0 0 8px;
+      }}
+      .ef-metric-row {{
+        display: flex; gap: 40px; margin-top: 40px; padding-top: 24px;
+        border-top: 1px solid rgba(241,237,228,0.18); flex-wrap: wrap;
+      }}
+      .ef-metric .num {{
+        font-family: 'Courier New', monospace; font-size: 24px; font-weight: 700;
+        color: #8FBF3F;
+      }}
+      .ef-metric .lbl {{
+        font-family: 'Courier New', monospace; font-size: 11px;
+        letter-spacing: 0.04em; color: rgba(241,237,228,0.6); margin-top: 3px;
+      }}
+      div[data-testid="stButton"] button {{
+        background-color: #8FBF3F !important;
+        color: #141F17 !important;
+        border: none !important;
+        font-weight: 700 !important;
+        font-size: 15px !important;
+        padding: 12px 28px !important;
+        border-radius: 4px !important;
+      }}
+      div[data-testid="stButton"] button:hover {{
+        background-color: #a3d456 !important;
+      }}
+    </style>
+
+    <div class="ef-landing">
+      <div class="ef-eyebrow">Rowan University · Sustainable Design &amp; Systems Medicine Lab</div>
+      <h1>Turn a waste stream into the<br><span>lowest-cost, lowest-emissions</span> route to a product.</h1>
+      <p>Enter what you're throwing away. ECO-FAST runs every viable processing pathway —
+      digestion, composting, liquefaction, incineration — and returns the one that costs
+      least, pollutes least, or balances both.</p>
+      <div class="ef-metric-row">
+        <div class="ef-metric">
+          <div class="num">15</div>
+          <div class="lbl">TECHNOLOGIES MODELED</div>
+        </div>
+        <div class="ef-metric">
+          <div class="num">3</div>
+          <div class="lbl">OPTIMIZATION OBJECTIVES</div>
+        </div>
+        <div class="ef-metric">
+          <div class="num">&lt;5 min</div>
+          <div class="lbl">TO A RESULT</div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_btn = st.columns([1, 6])
+    with col_btn[0]:
+        if st.button("Get Started →", key="get_started_btn"):
+            st.session_state["app_started"] = True
+            st.rerun()
+
+    st.stop()
+
+
 # ============================================================
 # TABS
 # ============================================================
@@ -821,14 +926,11 @@ with tab5:
         df       = result["pareto_df"]
         feasible = df[df["NAC"].notna()].copy()
 
-        # Pick best row based on objective
         if result_obj == "Lowest Cost Pathway":
             best = feasible.loc[feasible["NAC"].idxmin()]
         elif result_obj == "Lowest Emissions Pathway":
             best = feasible.loc[feasible["GHG"].idxmin()]
         else:
-            # Balanced: pick the Pareto point closest to the ideal
-            # (min-cost, min-emissions) corner, using normalized NAC/GHG.
             nac_min, nac_max = feasible["NAC"].min(), feasible["NAC"].max()
             ghg_min, ghg_max = feasible["GHG"].min(), feasible["GHG"].max()
             nac_range = nac_max - nac_min
@@ -858,7 +960,6 @@ with tab5:
         stb_tech  = str(best.get("STB", ""))
         feed_tpy  = Qf_v * Tann_v / 1000
 
-        # ── Product rows ──────────────────────────────────────
         product_rows = []
 
         if conv_tech == "HTL":
@@ -924,11 +1025,9 @@ with tab5:
                 "Total revenue [M$/yr]": f"{elec_mwh * 1000 * price_elec / 1e6:.4f}",
             })
 
-        # ── Show cost/emissions sections based on objective ────
         show_cost = result_obj != "Lowest Emissions Pathway"
         show_ghg  = result_obj != "Lowest Cost Pathway"
 
-        # ── Summary metrics ────────────────────────────────────
         if show_cost and show_ghg:
             col_m1, col_m2 = st.columns(2)
             with col_m1:
@@ -940,7 +1039,6 @@ with tab5:
         else:
             st.metric("GHG Emissions", f"{float(best.get('GHG', 0) or 0):,.1f} t CO₂-eq/yr")
 
-        # ── Columns ───────────────────────────────────────────
         if show_cost:
             col_left5, col_right5 = st.columns(2)
         else:
@@ -1047,7 +1145,6 @@ with tab5:
             ghg_cols   = ["GHG_IND", "GHG_DIR", "GHG_AQ", "GHG_DISP"]
             ghg_colors = ["#378ADD", "#D85A30", "#B47CC7", "#1D9E75"]
             ghg_vals   = [float(best.get(c, 0) or 0) for c in ghg_cols]
-            # Displacement credits reduce total emissions, so show as negative
             ghg_vals[3] = -ghg_vals[3]
 
             fig3, ax3 = plt.subplots(figsize=(8, 3))
@@ -1107,7 +1204,6 @@ with tab5:
 
 
 # ============================================================
-# ============================================================
 # TAB 6 - ENVIRONMENTAL JUSTICE
 # ============================================================
 with tab6:
@@ -1128,10 +1224,6 @@ with tab6:
     if not zipcode:
         st.info("Enter a facility zip code in the Feed Inputs tab to enable the EJ assessment.")
         st.stop()
-
-    # ============================================================
-    # HELPER FUNCTIONS
-    # ============================================================
 
     @st.cache_data(show_spinner=False)
     def get_coords_from_zip(zc):
@@ -1165,7 +1257,6 @@ with tab6:
         try:
             zc = str(zc).strip().zfill(5)
 
-            # Step 1 — get city and state
             city  = "Unknown"
             state = "Unknown"
             try:
@@ -1178,7 +1269,6 @@ with tab6:
             except:
                 pass
 
-            # Step 2 — Census API with key
             census_url = (
                 f"https://api.census.gov/data/2023/acs/acs5"
                 f"?get=B03002_001E,B03002_003E,"
@@ -1207,7 +1297,6 @@ with tab6:
             else:
                 raise ValueError("No data returned")
 
-            # National averages ACS 2022
             NAT_AVG_POC       = 40.0
             NAT_AVG_LOWINCOME = 29.0
             demo_index        = (pct_poc + pct_lowincome) / 2
@@ -1227,7 +1316,6 @@ with tab6:
             }
 
         except Exception as e:
-            # Fallback to state level estimates
             state_defaults = {
                 "NJ": {"pct_poc": 43.2, "pct_lowincome": 26.1, "total_pop": 20000},
                 "NY": {"pct_poc": 57.8, "pct_lowincome": 32.4, "total_pop": 25000},
@@ -1274,9 +1362,6 @@ with tab6:
         else:
             return "🟢 LOW"
 
-    # ============================================================
-    # FETCH DATA
-    # ============================================================
     with st.spinner(f"Loading data for zip code {zipcode}..."):
         lat, lon    = get_coords_from_zip(zipcode)
         census_data = get_census_demographics(zipcode, CENSUS_API_KEY)
@@ -1288,9 +1373,6 @@ with tab6:
         )
         st.stop()
 
-    # ============================================================
-    # SECTION 1 — MAP
-    # ============================================================
     section_header("Facility Location & Buffer Zones")
     st.markdown(
         "Buffer zones of **1 km**, **3 km**, and **5 km** are drawn around "
@@ -1355,9 +1437,6 @@ with tab6:
     else:
         st.info(f"Map unavailable for zip code {zipcode}.")
 
-    # ============================================================
-    # SECTION 2 — COMMUNITY PROFILE
-    # ============================================================
     st.markdown("---")
     section_header("Community Profile")
     st.markdown(
@@ -1398,9 +1477,6 @@ with tab6:
             delta_color="inverse"
         )
 
-    # ============================================================
-    # SECTION 3 — EJ INDEX PER PATHWAY
-    # ============================================================
     st.markdown("---")
     section_header("Environmental Justice Index by Pathway")
     st.markdown(
@@ -1445,7 +1521,6 @@ with tab6:
                 "INC": "#BA7517",
             }
 
-            # Get lowest GHG per conversion technology
             pathway_ghg = {}
             for conv in conv_map_full.keys():
                 subset = feasible[feasible["Conv"] == conv]
@@ -1456,7 +1531,6 @@ with tab6:
                 st.warning("No pathway GHG data found. Please re-run optimization.")
                 st.stop()
 
-            # Calculate EJ Index per pathway
             demo_idx   = census_data["demo_index"]
             nat_idx    = census_data["nat_demo_index"]
             population = census_data["total_pop"]
@@ -1518,9 +1592,6 @@ with tab6:
             st.pyplot(fig_ej)
             plt.close()
 
-            # ============================================================
-            # SECTION 4 — RECOMMENDATION
-            # ============================================================
             st.markdown("---")
             section_header("EJ Recommendation")
 
@@ -1558,9 +1629,6 @@ with tab6:
                 f"**{ej_diff:,.0f} EJ Index units**."
             )
 
-            # ============================================================
-            # SECTION 5 — CITATIONS
-            # ============================================================
             st.markdown("---")
             with st.expander("Methodology & Citations"):
                 st.markdown("""
