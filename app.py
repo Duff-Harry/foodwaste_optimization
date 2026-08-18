@@ -271,18 +271,18 @@ if not st.session_state["app_started"]:
     </style>
 
     <div class="ef-landing">
-      <h1 style="font-size:44px; font-weight:800; line-height:1.12; margin:0 0 20px; max-width:720px; color:#F1EDE4 !important;">
+      <div style="font-size:44px; font-weight:800; line-height:1.12; margin:0 0 20px; max-width:720px; color:#F1EDE4 !important; font-family:sans-serif;">
         Turn a waste stream into the<br>
         <span style="color:#8FBF3F !important;">lowest-cost, lowest-emissions</span> route to a product.
-      </h1>
-      <p style="font-size:17px; line-height:1.55; color:rgba(241,237,228,0.85) !important; max-width:560px; margin:0 0 8px;">
+      </div>
+      <div style="font-size:17px; line-height:1.55; color:#E8E5DC !important; max-width:560px; margin:0 0 8px; font-family:sans-serif;">
         Enter what you're throwing away. ECO-FAST runs every viable processing pathway —
         digestion, composting, liquefaction, incineration — and returns the one that costs
         least, pollutes least, or balances both.
-      </p>
-      <p style="font-family:'Courier New',monospace; font-size:13px; color:rgba(241,237,228,0.65) !important; text-decoration:underline; margin-top:80px;">
+      </div>
+      <div style="font-family:'Courier New',monospace; font-size:13px; color:#C9C5B8 !important; text-decoration:underline; margin-top:80px;">
         see how the model works
-      </p>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
