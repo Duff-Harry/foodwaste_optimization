@@ -31,6 +31,11 @@ st.set_page_config(
 st.markdown("""
 <style>
     .stApp { background-color: #D4D0C8; }
+    .main, .block-container, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+        opacity: 1 !important;
+        animation: none !important;
+        transition: none !important;
+    }
     header[data-testid="stHeader"] { display: none !important; }
     .block-container { padding-top: 0rem !important; margin-top: 0rem !important; }
     [data-testid="stAppViewContainer"] { padding-top: 0rem !important; }
