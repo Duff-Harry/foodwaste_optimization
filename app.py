@@ -19,9 +19,7 @@ from food_waste_database import (
     get_references, get_HHV, validate_composition,
 )
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
+
 st.set_page_config(
     page_title="ECO-FAST",
     page_icon="🌿",
@@ -29,9 +27,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ============================================================
-# CSS
-# ============================================================
+
 st.markdown("""
 <style>
     .stApp { background-color: #D4D0C8; }
@@ -816,6 +812,12 @@ with tab5:
     if result is None:
         st.info("Select an objective above and click Run Optimization to see results.")
     else:
+        if selected_obj != result_obj:
+            st.warning(
+                f"These results were computed for **{result_obj}**. "
+                f"Click **Run Optimization** to recompute for **{selected_obj}**."
+            )
+
         df       = result["pareto_df"]
         feasible = df[df["NAC"].notna()].copy()
 
@@ -825,7 +827,16 @@ with tab5:
         elif result_obj == "Lowest Emissions Pathway":
             best = feasible.loc[feasible["GHG"].idxmin()]
         else:
-            best = feasible.iloc[0]
+            # Balanced: pick the Pareto point closest to the ideal
+            # (min-cost, min-emissions) corner, using normalized NAC/GHG.
+            nac_min, nac_max = feasible["NAC"].min(), feasible["NAC"].max()
+            ghg_min, ghg_max = feasible["GHG"].min(), feasible["GHG"].max()
+            nac_range = nac_max - nac_min
+            ghg_range = ghg_max - ghg_min
+            nac_norm = (feasible["NAC"] - nac_min) / nac_range if nac_range > 0 else 0
+            ghg_norm = (feasible["GHG"] - ghg_min) / ghg_range if ghg_range > 0 else 0
+            distance = np.sqrt(nac_norm ** 2 + ghg_norm ** 2)
+            best = feasible.loc[distance.idxmin()]
 
         conv_map = {
             "HTL": "Hydrothermal Liquefaction", "AND": "Anaerobic Digestion",
@@ -913,8 +924,28 @@ with tab5:
                 "Total revenue [M$/yr]": f"{elec_mwh * 1000 * price_elec / 1e6:.4f}",
             })
 
+        # ── Show cost/emissions sections based on objective ────
+        show_cost = result_obj != "Lowest Emissions Pathway"
+        show_ghg  = result_obj != "Lowest Cost Pathway"
+
+        # ── Summary metrics ────────────────────────────────────
+        if show_cost and show_ghg:
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                st.metric("Net Annual Cost", f"{float(best.get('NAC', 0) or 0):.3f} M$/yr")
+            with col_m2:
+                st.metric("GHG Emissions", f"{float(best.get('GHG', 0) or 0):,.1f} t CO₂-eq/yr")
+        elif show_cost:
+            st.metric("Net Annual Cost", f"{float(best.get('NAC', 0) or 0):.3f} M$/yr")
+        else:
+            st.metric("GHG Emissions", f"{float(best.get('GHG', 0) or 0):,.1f} t CO₂-eq/yr")
+
         # ── Columns ───────────────────────────────────────────
-        col_left5, col_right5 = st.columns(2)
+        if show_cost:
+            col_left5, col_right5 = st.columns(2)
+        else:
+            col_left5  = st.container()
+            col_right5 = None
 
         with col_left5:
             section_header("Technologies in Optimal Pathway")
@@ -962,7 +993,8 @@ with tab5:
             else:
                 st.info("No marketable products identified for this pathway.")
 
-        with col_right5:
+        if show_cost:
+          with col_right5:
             section_header("Cost breakdown")
             cost_labels = ["Capital","Working\nCapital","Insurance",
                            "Utilities","Labor","Overhead","Raw\nMaterials","Disposal"]
@@ -1007,6 +1039,36 @@ with tab5:
             st.pyplot(fig2)
             plt.close()
 
+        if show_ghg:
+            st.markdown("---")
+            section_header("Emissions breakdown")
+            ghg_labels = ["Indirect\n(Electricity)", "Direct\n(Process)",
+                          "Aqueous/Char\nDisposal", "Displacement\nCredits"]
+            ghg_cols   = ["GHG_IND", "GHG_DIR", "GHG_AQ", "GHG_DISP"]
+            ghg_colors = ["#378ADD", "#D85A30", "#B47CC7", "#1D9E75"]
+            ghg_vals   = [float(best.get(c, 0) or 0) for c in ghg_cols]
+            # Displacement credits reduce total emissions, so show as negative
+            ghg_vals[3] = -ghg_vals[3]
+
+            fig3, ax3 = plt.subplots(figsize=(8, 3))
+            fig3.patch.set_facecolor("white")
+            ax3.set_facecolor("white")
+            ax3.bar(ghg_labels, ghg_vals, color=ghg_colors,
+                    edgecolor="white", linewidth=0.5)
+            ax3.axhline(y=0, color="black", linewidth=0.8)
+            ax3.set_ylabel("GHG Emissions [t CO₂-eq/yr]", fontsize=9)
+            ax3.tick_params(axis='x', labelsize=8)
+            ax3.grid(True, alpha=0.2, axis="y", linestyle="--")
+            ax3.spines["top"].set_visible(False)
+            ax3.spines["right"].set_visible(False)
+            plt.tight_layout()
+            st.pyplot(fig3)
+            plt.close()
+            st.caption(
+                f"**Total GHG Emissions: {float(best.get('GHG', 0) or 0):,.1f} t CO₂-eq/yr** "
+                "= Indirect + Direct + Aqueous/Char − Displacement Credits"
+            )
+
         if result_obj == "Lowest Cost & Emissions Pathway":
             st.markdown("---")
             section_header("Pareto Front — All Trade-off Solutions")
@@ -1045,84 +1107,483 @@ with tab5:
 
 
 # ============================================================
+# ============================================================
 # TAB 6 - ENVIRONMENTAL JUSTICE
 # ============================================================
 with tab6:
+
+    CENSUS_API_KEY = "3d8f6af9980c901549cd2ba01f6ad14ffed8fa20"
+
     section_header("Environmental Justice Assessment")
     st.markdown(
-        "Enter a facility zip code in the **Feed Inputs** tab to load the EPA EJScreen assessment."
+        "This tab calculates the Environmental Justice (EJ) burden of each food waste "
+        "processing pathway using the methodology of Joseph & Kamanmalek (2026) and "
+        "Greer et al. (2024). The EJ Index combines pathway emissions with community "
+        "vulnerability to identify the most equitable processing option."
     )
 
-    zipcode           = st.session_state.get("zipcode")
-    selected_waste_ej = st.session_state.get("selected_waste", "Unknown")
+    zipcode = st.session_state.get("zipcode")
+    result  = st.session_state.get("result", None)
 
     if not zipcode:
-        st.info("Enter a facility zip code in the Feed Inputs tab to see the Environmental Justice assessment.")
-    else:
-        with st.spinner(f"Fetching EPA EJScreen data for zip code {zipcode}..."):
-            ej_data = fetch_ejscreen(zipcode)
+        st.info("Enter a facility zip code in the Feed Inputs tab to enable the EJ assessment.")
+        st.stop()
 
-        if ej_data is None:
-            st.warning(
-                f"Could not retrieve EJScreen data for zip code {zipcode}. "
-                "Please check the zip code and your internet connection."
+    # ============================================================
+    # HELPER FUNCTIONS
+    # ============================================================
+
+    @st.cache_data(show_spinner=False)
+    def get_coords_from_zip(zc):
+        known_coords = {
+            "08028": (39.7026, -75.1121),
+            "07102": (40.7357, -74.1724),
+            "10001": (40.7484, -73.9967),
+            "19104": (39.9526, -75.1652),
+            "07030": (40.7440, -74.0324),
+            "08901": (40.4774, -74.4432),
+            "07001": (40.5851, -74.2771),
+            "08103": (39.9526, -75.1196),
+            "07306": (40.7178, -74.0431),
+            "10451": (40.8282, -73.9265),
+        }
+        zc = str(zc).strip().zfill(5)
+        if zc in known_coords:
+            return known_coords[zc]
+        try:
+            url = f"https://api.zippopotam.us/us/{zc}"
+            r   = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                place = r.json()["places"][0]
+                return float(place["latitude"]), float(place["longitude"])
+        except:
+            pass
+        return None, None
+
+    @st.cache_data(show_spinner=False)
+    def get_census_demographics(zc, api_key):
+        try:
+            zc = str(zc).strip().zfill(5)
+
+            # Step 1 — get city and state
+            city  = "Unknown"
+            state = "Unknown"
+            try:
+                zip_url = f"https://api.zippopotam.us/us/{zc}"
+                zip_r   = requests.get(zip_url, timeout=10)
+                if zip_r.status_code == 200:
+                    zip_data = zip_r.json()
+                    city  = zip_data["places"][0]["place name"]
+                    state = zip_data["places"][0]["state abbreviation"]
+            except:
+                pass
+
+            # Step 2 — Census API with key
+            census_url = (
+                f"https://api.census.gov/data/2023/acs/acs5"
+                f"?get=B03002_001E,B03002_003E,"
+                f"B17001_001E,B17001_002E,B01003_001E"
+                f"&for=zip%20code%20tabulation%20area:{zc}"
+                f"&key={api_key}"
             )
-        else:
-            col_ej1, col_ej2, col_ej3 = st.columns(3)
-            with col_ej1:
-                st.markdown("**Community Profile**")
-                st.markdown(f"- Minority population: **{ej_data['pct_minority']:.1f}%**")
-                st.markdown(f"- Low-income population: **{ej_data['pct_lowincome']:.1f}%**")
-                st.markdown(f"- Less than high school education: **{ej_data['pct_less_hs']:.1f}%**")
-            with col_ej2:
-                st.markdown("**Environmental Burdens**")
-                st.markdown(f"- PM2.5 concentration: **{ej_data['pm25']:.2f} ug/m3**")
-                st.markdown(f"- Ozone level: **{ej_data['ozone']:.2f} ppb**")
-                st.markdown(f"- Diesel PM: **{ej_data['diesel_pm']:.4f}**")
-                st.markdown(f"- Proximity to Superfund sites: **{ej_data['superfund_prox']:.4f}**")
-            with col_ej3:
-                st.markdown("**EJ Risk Rating**")
-                pctile = ej_data.get("ej_pctile", 0)
-                st.markdown(
-                    f"EJScreen Percentile: **{pctile:.0f}th**  \n"
-                    f"Risk Level: {ej_risk_label(pctile)}",
-                    unsafe_allow_html=True
-                )
-                st.markdown(f"EJ Index Score: **{ej_data['ej_index']:.2f}**")
+            cr    = requests.get(census_url, timeout=15)
+            cdata = cr.json()
 
-            st.markdown("---")
-            st.markdown("**EJ Considerations for your waste type:**")
+            if len(cdata) >= 2:
+                headers = cdata[0]
+                values  = cdata[1]
+                row     = dict(zip(headers, values))
 
-            ej_context = {
-                "Mixed Restaurant / Cafeteria Waste": "Restaurant waste facilities in dense urban areas can increase truck traffic and odor in surrounding communities. Consider proximity to residential neighborhoods.",
-                "Fruit & Vegetable Waste": "Composting of fruit/vegetable waste may generate odors. Ensure the facility is not sited near schools or hospitals in high-EJ communities.",
-                "Meat & Fish Waste": "Meat and fish waste processing generates strong odors and wastewater. High EJ communities near such facilities face disproportionate burdens.",
-                "Bread & Bakery Waste": "Bakery waste is generally low-odor. Anaerobic digestion is preferred in high-EJ areas due to lower air quality impacts.",
-                "Dairy Waste": "Dairy waste can generate significant odor and methane. Ensure communities near the facility have been consulted.",
-                "Campus Dining Hall Waste": "Campus waste facilities serve a defined institution - community impacts are typically lower, but surrounding neighborhoods should still be considered.",
-                "Household Kitchen Waste": "Municipal food waste facilities serve the public - siting decisions should prioritize communities not already overburdened by waste infrastructure.",
-                "Municipal Solid Waste (Organic Fraction)": "Large-scale MSW facilities carry significant EJ implications. Community benefit agreements are strongly recommended.",
+                total_pop    = float(row.get("B01003_001E", 0) or 0)
+                total_race   = float(row.get("B03002_001E", 1) or 1)
+                white_alone  = float(row.get("B03002_003E", 0) or 0)
+                pov_universe = float(row.get("B17001_001E", 1) or 1)
+                pov_below    = float(row.get("B17001_002E", 0) or 0)
+
+                pct_poc       = max(0, ((total_race - white_alone) / total_race) * 100)
+                pct_lowincome = max(0, (pov_below / pov_universe) * 100)
+                data_source   = "U.S. Census ACS 2023 5-year estimates (zip code level)"
+
+            else:
+                raise ValueError("No data returned")
+
+            # National averages ACS 2022
+            NAT_AVG_POC       = 40.0
+            NAT_AVG_LOWINCOME = 29.0
+            demo_index        = (pct_poc + pct_lowincome) / 2
+            nat_demo_index    = (NAT_AVG_POC + NAT_AVG_LOWINCOME) / 2
+
+            return {
+                "total_pop":         total_pop,
+                "pct_poc":           round(pct_poc, 1),
+                "pct_lowincome":     round(pct_lowincome, 1),
+                "demo_index":        round(demo_index, 2),
+                "nat_demo_index":    round(nat_demo_index, 2),
+                "nat_avg_poc":       NAT_AVG_POC,
+                "nat_avg_lowincome": NAT_AVG_LOWINCOME,
+                "city":              city,
+                "state":             state,
+                "data_source":       data_source,
             }
-            context_msg = ej_context.get(
-                selected_waste_ej,
-                "Consider the environmental justice implications of siting this facility, particularly regarding community consultation and burden distribution."
-            )
-            st.info(context_msg)
 
-            if pctile >= 80:
-                st.warning(
-                    "High EJ concern area. Technologies with lower air emissions such as "
-                    "Anaerobic Digestion and Composting are preferred over Incineration "
-                    "or Sanitary Landfill."
+        except Exception as e:
+            # Fallback to state level estimates
+            state_defaults = {
+                "NJ": {"pct_poc": 43.2, "pct_lowincome": 26.1, "total_pop": 20000},
+                "NY": {"pct_poc": 57.8, "pct_lowincome": 32.4, "total_pop": 25000},
+                "PA": {"pct_poc": 31.2, "pct_lowincome": 29.8, "total_pop": 18000},
+                "CA": {"pct_poc": 63.4, "pct_lowincome": 31.2, "total_pop": 30000},
+                "TX": {"pct_poc": 59.1, "pct_lowincome": 33.6, "total_pop": 22000},
+                "FL": {"pct_poc": 47.2, "pct_lowincome": 30.1, "total_pop": 21000},
+                "GA": {"pct_poc": 51.3, "pct_lowincome": 31.4, "total_pop": 19000},
+                "IL": {"pct_poc": 45.6, "pct_lowincome": 30.2, "total_pop": 21000},
+                "OH": {"pct_poc": 28.4, "pct_lowincome": 30.1, "total_pop": 17000},
+                "NC": {"pct_poc": 40.2, "pct_lowincome": 29.8, "total_pop": 18000},
+            }
+            defaults = state_defaults.get(state, {
+                "pct_poc": 40.0, "pct_lowincome": 29.0, "total_pop": 20000,
+            })
+            NAT_AVG_POC       = 40.0
+            NAT_AVG_LOWINCOME = 29.0
+            demo_index        = (defaults["pct_poc"] + defaults["pct_lowincome"]) / 2
+            nat_demo_index    = (NAT_AVG_POC + NAT_AVG_LOWINCOME) / 2
+            return {
+                "total_pop":         defaults["total_pop"],
+                "pct_poc":           defaults["pct_poc"],
+                "pct_lowincome":     defaults["pct_lowincome"],
+                "demo_index":        round(demo_index, 2),
+                "nat_demo_index":    round(nat_demo_index, 2),
+                "nat_avg_poc":       NAT_AVG_POC,
+                "nat_avg_lowincome": NAT_AVG_LOWINCOME,
+                "city":              city,
+                "state":             state,
+                "data_source":       "State-level ACS estimates (Census API unavailable)",
+            }
+
+    def calculate_ej_index(ghg_tpy, demo_index, nat_demo_index, population):
+        return ghg_tpy * (demo_index / 100 - nat_demo_index / 100) * population
+
+    def ej_concern_label(ej_val, ej_min, ej_max):
+        if ej_max == ej_min:
+            return "🟡 MODERATE"
+        norm = (ej_val - ej_min) / (ej_max - ej_min)
+        if norm >= 0.67:
+            return "🔴 HIGH"
+        elif norm >= 0.33:
+            return "🟡 MODERATE"
+        else:
+            return "🟢 LOW"
+
+    # ============================================================
+    # FETCH DATA
+    # ============================================================
+    with st.spinner(f"Loading data for zip code {zipcode}..."):
+        lat, lon    = get_coords_from_zip(zipcode)
+        census_data = get_census_demographics(zipcode, CENSUS_API_KEY)
+
+    if census_data is None:
+        st.warning(
+            f"Could not retrieve demographic data for zip code {zipcode}. "
+            "Please check the zip code and try again."
+        )
+        st.stop()
+
+    # ============================================================
+    # SECTION 1 — MAP
+    # ============================================================
+    section_header("Facility Location & Buffer Zones")
+    st.markdown(
+        "Buffer zones of **1 km**, **3 km**, and **5 km** are drawn around "
+        "the facility location following Joseph & Kamanmalek (2026)."
+    )
+
+    if lat and lon:
+        try:
+            import folium
+            from streamlit_folium import st_folium
+
+            m_map = folium.Map(
+                location=[lat, lon],
+                zoom_start=12,
+                tiles="CartoDB positron"
+            )
+            folium.Circle(
+                location=[lat, lon], radius=5000,
+                color="#2E8B57", weight=2,
+                fill=True, fill_opacity=0.07,
+                tooltip="5 km — Broader community"
+            ).add_to(m_map)
+            folium.Circle(
+                location=[lat, lon], radius=3000,
+                color="#FF8800", weight=2,
+                fill=True, fill_opacity=0.10,
+                tooltip="3 km — Surrounding neighborhood"
+            ).add_to(m_map)
+            folium.Circle(
+                location=[lat, lon], radius=1000,
+                color="#CC0000", weight=2,
+                fill=True, fill_opacity=0.15,
+                tooltip="1 km — Immediate impact zone"
+            ).add_to(m_map)
+            folium.Marker(
+                location=[lat, lon],
+                tooltip=(
+                    f"Facility — {census_data['city']}, "
+                    f"{census_data['state']} {zipcode}"
+                ),
+                icon=folium.Icon(color="red", icon="info-sign")
+            ).add_to(m_map)
+            legend_html = """
+            <div style="position:fixed; bottom:30px; left:30px; z-index:1000;
+                        background:white; padding:12px 16px;
+                        border:1px solid #ccc; border-radius:8px;
+                        font-size:12px; font-family:Arial;">
+                <b>Buffer Zones</b><br>
+                <span style="color:#CC0000;">&#9679;</span>
+                1 km &nbsp;Immediate impact<br>
+                <span style="color:#FF8800;">&#9679;</span>
+                3 km &nbsp;Neighborhood<br>
+                <span style="color:#2E8B57;">&#9679;</span>
+                5 km &nbsp;Broader community
+            </div>
+            """
+            m_map.get_root().html.add_child(folium.Element(legend_html))
+            st_folium(m_map, width=700, height=420, returned_objects=[])
+
+        except ImportError:
+            st.warning("Run: python -m pip install folium streamlit-folium")
+    else:
+        st.info(f"Map unavailable for zip code {zipcode}.")
+
+    # ============================================================
+    # SECTION 2 — COMMUNITY PROFILE
+    # ============================================================
+    st.markdown("---")
+    section_header("Community Profile")
+    st.markdown(
+        f"Demographics for **{census_data['city']}, "
+        f"{census_data['state']} ({zipcode})** "
+        "compared to national averages.  \n"
+        f"Source: {census_data['data_source']}."
+    )
+
+    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+    with col_p1:
+        st.metric(
+            "Total Population",
+            f"{int(census_data['total_pop']):,}"
+        )
+    with col_p2:
+        delta_poc = census_data["pct_poc"] - census_data["nat_avg_poc"]
+        st.metric(
+            "People of Color",
+            f"{census_data['pct_poc']:.1f}%",
+            delta=f"{delta_poc:+.1f}% vs national",
+            delta_color="inverse"
+        )
+    with col_p3:
+        delta_li = census_data["pct_lowincome"] - census_data["nat_avg_lowincome"]
+        st.metric(
+            "Low Income",
+            f"{census_data['pct_lowincome']:.1f}%",
+            delta=f"{delta_li:+.1f}% vs national",
+            delta_color="inverse"
+        )
+    with col_p4:
+        delta_di = census_data["demo_index"] - census_data["nat_demo_index"]
+        st.metric(
+            "Demographic Index",
+            f"{census_data['demo_index']:.1f}%",
+            delta=f"{delta_di:+.1f}% vs national",
+            delta_color="inverse"
+        )
+
+    # ============================================================
+    # SECTION 3 — EJ INDEX PER PATHWAY
+    # ============================================================
+    st.markdown("---")
+    section_header("Environmental Justice Index by Pathway")
+    st.markdown(
+        "The EJ Index combines **pathway GHG emissions** with "
+        "**community vulnerability** to show which processing option "
+        "places the least burden on the surrounding community.  \n"
+        "**Lower EJ Index = more equitable outcome.**"
+    )
+    st.caption(
+        "EJ Index = GHG Emissions (t CO₂-eq/yr) × "
+        "(Local Demographic Index − National Average) × Population  \n"
+        "Following Greer et al. (2024) Equation 2 and "
+        "EJScreen methodology (U.S. EPA, 2023)"
+    )
+
+    if result is None:
+        st.info(
+            "Run the optimization in the **Results** tab first "
+            "to calculate pathway-specific EJ scores."
+        )
+    else:
+        df       = result["pareto_df"]
+        feasible = df[df["GHG"].notna()].copy()
+
+        if feasible.empty:
+            st.warning("No feasible results found. Please re-run the optimization.")
+        else:
+            conv_map_full = {
+                "HTL": "Hydrothermal Liquefaction",
+                "AND": "Anaerobic Digestion",
+                "CMP": "Composting",
+                "WWT": "Wastewater Treatment",
+                "SLF": "Sanitary Landfill",
+                "INC": "Incineration",
+            }
+            color_map_ej = {
+                "HTL": "#7F77DD",
+                "AND": "#1D9E75",
+                "CMP": "#D4537E",
+                "WWT": "#378ADD",
+                "SLF": "#D85A30",
+                "INC": "#BA7517",
+            }
+
+            # Get lowest GHG per conversion technology
+            pathway_ghg = {}
+            for conv in conv_map_full.keys():
+                subset = feasible[feasible["Conv"] == conv]
+                if not subset.empty:
+                    pathway_ghg[conv] = subset["GHG"].min()
+
+            if not pathway_ghg:
+                st.warning("No pathway GHG data found. Please re-run optimization.")
+                st.stop()
+
+            # Calculate EJ Index per pathway
+            demo_idx   = census_data["demo_index"]
+            nat_idx    = census_data["nat_demo_index"]
+            population = census_data["total_pop"]
+
+            ej_rows = []
+            for conv, ghg in pathway_ghg.items():
+                ej_index = calculate_ej_index(
+                    ghg, demo_idx, nat_idx, population
                 )
-            elif pctile >= 50:
+                ej_rows.append({
+                    "conv_code":          conv,
+                    "Technology":         conv_map_full[conv],
+                    "GHG (t CO₂-eq/yr)": round(ghg, 1),
+                    "EJ Index":           round(ej_index, 0),
+                })
+
+            ej_df  = (pd.DataFrame(ej_rows)
+                        .sort_values("EJ Index")
+                        .reset_index(drop=True))
+            ej_min = ej_df["EJ Index"].min()
+            ej_max = ej_df["EJ Index"].max()
+
+            ej_df["EJ Rank"]    = range(1, len(ej_df) + 1)
+            ej_df["EJ Concern"] = ej_df["EJ Index"].apply(
+                lambda x: ej_concern_label(x, ej_min, ej_max)
+            )
+
+            st.dataframe(
+                ej_df[[
+                    "EJ Rank", "Technology",
+                    "GHG (t CO₂-eq/yr)", "EJ Index", "EJ Concern"
+                ]],
+                use_container_width=True,
+                hide_index=True
+            )
+
+            fig_ej, ax_ej = plt.subplots(figsize=(8, 3.5))
+            fig_ej.patch.set_facecolor("white")
+            ax_ej.set_facecolor("white")
+            techs  = ej_df["Technology"].tolist()
+            values = ej_df["EJ Index"].tolist()
+            colors = [
+                color_map_ej.get(c, "#999999")
+                for c in ej_df["conv_code"].tolist()
+            ]
+            ax_ej.barh(
+                techs, values,
+                color=colors, edgecolor="white", linewidth=0.5
+            )
+            ax_ej.set_xlabel(
+                "EJ Index — higher = greater burden on vulnerable communities",
+                fontsize=9
+            )
+            ax_ej.axvline(x=0, color="black", linewidth=0.8, linestyle="--")
+            ax_ej.spines["top"].set_visible(False)
+            ax_ej.spines["right"].set_visible(False)
+            ax_ej.grid(True, alpha=0.2, axis="x", linestyle="--")
+            plt.tight_layout()
+            st.pyplot(fig_ej)
+            plt.close()
+
+            # ============================================================
+            # SECTION 4 — RECOMMENDATION
+            # ============================================================
+            st.markdown("---")
+            section_header("EJ Recommendation")
+
+            best_pathway  = ej_df.iloc[0]
+            worst_pathway = ej_df.iloc[-1]
+
+            if demo_idx > nat_idx:
                 st.warning(
-                    "Moderate EJ concern. Consider community engagement and monitoring programs. "
-                    "Prefer closed-loop technologies such as Anaerobic Digestion and HTL."
+                    f"⚠️ The community around this facility has a "
+                    f"Demographic Index of **{demo_idx:.1f}%** — "
+                    f"above the national average of **{nat_idx:.1f}%**. "
+                    f"This population is more vulnerable and EJ "
+                    f"considerations are especially important here."
                 )
             else:
                 st.success(
-                    "Lower EJ burden area. The facility area has relatively lower environmental "
-                    "justice concerns. Standard technology selection applies, but community "
+                    f"✅ The community around this facility has a "
+                    f"Demographic Index of **{demo_idx:.1f}%** — "
+                    f"at or below the national average of {nat_idx:.1f}%. "
+                    "Standard pathway selection applies, but community "
                     "engagement is still recommended."
                 )
+
+            ej_diff = abs(worst_pathway["EJ Index"] - best_pathway["EJ Index"])
+            st.markdown(
+                f"**Most equitable pathway:** "
+                f"{best_pathway['Technology']} — "
+                f"EJ Index: **{best_pathway['EJ Index']:,.0f}**  \n"
+                f"**Least equitable pathway:** "
+                f"{worst_pathway['Technology']} — "
+                f"EJ Index: **{worst_pathway['EJ Index']:,.0f}**  \n\n"
+                f"Selecting **{best_pathway['Technology']}** over "
+                f"**{worst_pathway['Technology']}** reduces the EJ "
+                f"burden on this community by "
+                f"**{ej_diff:,.0f} EJ Index units**."
+            )
+
+            # ============================================================
+            # SECTION 5 — CITATIONS
+            # ============================================================
+            st.markdown("---")
+            with st.expander("Methodology & Citations"):
+                st.markdown("""
+**Buffer Zone Analysis**
+Buffer zones of 1 km, 3 km, and 5 km are drawn around the facility
+location following Joseph & Kamanmalek (2026), who applied this method
+to 142 landfills in South Carolina using ArcGIS Pro 3.2.2.
+
+**Demographic Index**
+Demographic Index = (% people of color + % low income) ÷ 2
+Following the EJScreen Technical Documentation (U.S. EPA, 2023).
+
+**EJ Index Formula**
+EJ Index = Pathway GHG Emissions × (Local Demographic Index −
+National Demographic Index) × Population
+Following Greer et al. (2024) Equation 2 — Exposure Disparity
+formula from the Port of Oakland environmental justice study.
+
+**References**
+- Joseph & Kamanmalek (2026). Environmental Sociology, Vol. 12,
+  No. 2, pp. 390–414
+- Greer, Bin Thaneya & Horvath (2024). Environmental Science &
+  Technology, 58, 8135–8148. DOI: 10.1021/acs.est.3c07728
+- U.S. EPA (2023). EJScreen Technical Documentation v2.2
+- U.S. Census Bureau. ACS 2023 5-Year Estimates
+                """)

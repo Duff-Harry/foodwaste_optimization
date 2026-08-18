@@ -126,6 +126,10 @@ def extract_row(vars, label, eps, status):
         "CTIP":      round(get_value(vars["CTIP"]),  4),
         "REV":       round(get_value(vars["REV"]),   4),
         "CCTC":      round(get_value(vars["CCTC"]),  4),
+        "GHG_IND":   round(get_value(vars["GHG_ind_tpy"]),   1),
+        "GHG_DIR":   round(get_value(vars["GHG_dir_total"]), 1),
+        "GHG_AQ":    round(get_value(vars["GHG_aq"]),        1),
+        "GHG_DISP":  round(get_value(vars["GHG_disp"]),      1),
         "Status":    status,
     }
 
@@ -227,7 +231,7 @@ def run_diagnostic(user_inputs: dict,
                              equations=m.getEquations(),
                              problem="MINLP", sense=Sense.MIN, objective=NAC)
                 try:
-                    diag.solve(solver="BARON", options=solver_opts)
+                    diag.solve(solver="SBB", options=solver_opts)
                     stat = str(diag.status)
                 except Exception as e:
                     stat = f"ERROR: {type(e).__name__}"
@@ -274,23 +278,22 @@ def run_pareto(user_inputs: dict,
         GHG_total_tpy = vars["GHG_total_tpy"]
         obj           = vars["obj"]
 
-        # ── ANCHOR A — minimise NAC ───────────────────────────
-        print("=" * 60)
-        print("ANCHOR A — minimise NAC")
-        print("=" * 60)
-        unfix_all(vars)
-
-        mdl_A = Model(m, name="anchor_NAC",
-                      equations=m.getEquations(),
-                      problem="MINLP", sense=Sense.MIN, objective=NAC)
-        mdl_A.solve(solver="BARON", options=solver_opts)
-
-        NAC_min  = get_value(NAC)
-        GHG_at_A = get_value(GHG_total_tpy)
-        print(f"  Status: {mdl_A.status}  NAC={NAC_min:.4f}  GHG={GHG_at_A:.1f}")
-
-        # ── If Lowest Cost only — return Anchor A ─────────────
+        # ── Lowest Cost only — minimise NAC and return ────────
         if objective == "Lowest Cost Pathway":
+            print("=" * 60)
+            print("ANCHOR A — minimise NAC")
+            print("=" * 60)
+            unfix_all(vars)
+
+            mdl_A = Model(m, name="anchor_NAC",
+                          equations=m.getEquations(),
+                          problem="MINLP", sense=Sense.MIN, objective=NAC)
+            mdl_A.solve(solver="SBB", options=solver_opts)
+
+            NAC_min  = get_value(NAC)
+            GHG_at_A = get_value(GHG_total_tpy)
+            print(f"  Status: {mdl_A.status}  NAC={NAC_min:.4f}  GHG={GHG_at_A:.1f}")
+
             row = extract_row(vars, "p1", GHG_at_A, str(mdl_A.status))
             df  = pd.DataFrame([row])
             df.to_csv("pareto_results.csv", index=False)
@@ -302,7 +305,49 @@ def run_pareto(user_inputs: dict,
                 "GHG_min":   GHG_at_A,
             }
 
-        # ── ANCHOR B — minimise GHG ───────────────────────────
+        # ── Lowest Emissions only — minimise GHG and return ───
+        if objective == "Lowest Emissions Pathway":
+            print("=" * 60)
+            print("ANCHOR B — minimise GHG")
+            print("=" * 60)
+            unfix_all(vars)
+
+            mdl_B = Model(m, name="anchor_GHG",
+                          equations=m.getEquations(),
+                          problem="MINLP", sense=Sense.MIN,
+                          objective=GHG_total_tpy)
+            mdl_B.solve(solver="SBB", options=solver_opts)
+
+            GHG_min  = get_value(GHG_total_tpy)
+            NAC_at_B = get_value(NAC)
+            print(f"  Status: {mdl_B.status}  GHG={GHG_min:.1f}  NAC={NAC_at_B:.4f}")
+
+            row = extract_row(vars, "p1", GHG_min, str(mdl_B.status))
+            df  = pd.DataFrame([row])
+            df.to_csv("pareto_results.csv", index=False)
+            return {
+                "status":    "success",
+                "message":   "Lowest Emissions Pathway optimized",
+                "pareto_df": df,
+                "NAC_min":   NAC_at_B,
+                "GHG_min":   GHG_min,
+            }
+
+        # ── Balanced — need both anchors for the eps-grid bounds ──
+        print("=" * 60)
+        print("ANCHOR A — minimise NAC")
+        print("=" * 60)
+        unfix_all(vars)
+
+        mdl_A = Model(m, name="anchor_NAC",
+                      equations=m.getEquations(),
+                      problem="MINLP", sense=Sense.MIN, objective=NAC)
+        mdl_A.solve(solver="SBB", options=solver_opts)
+
+        NAC_min  = get_value(NAC)
+        GHG_at_A = get_value(GHG_total_tpy)
+        print(f"  Status: {mdl_A.status}  NAC={NAC_min:.4f}  GHG={GHG_at_A:.1f}")
+
         print("=" * 60)
         print("ANCHOR B — minimise GHG")
         print("=" * 60)
@@ -312,24 +357,11 @@ def run_pareto(user_inputs: dict,
                       equations=m.getEquations(),
                       problem="MINLP", sense=Sense.MIN,
                       objective=GHG_total_tpy)
-        mdl_B.solve(solver="BARON", options=solver_opts)
+        mdl_B.solve(solver="SBB", options=solver_opts)
 
         GHG_min  = get_value(GHG_total_tpy)
         NAC_at_B = get_value(NAC)
         print(f"  Status: {mdl_B.status}  GHG={GHG_min:.1f}  NAC={NAC_at_B:.4f}")
-
-        # ── If Lowest Emissions only — return Anchor B ────────
-        if objective == "Lowest Emissions Pathway":
-            row = extract_row(vars, "p1", GHG_min, str(mdl_B.status))
-            df  = pd.DataFrame([row])
-            df.to_csv("pareto_results.csv", index=False)
-            return {
-                "status":    "success",
-                "message":   "Lowest Emissions Pathway optimized",
-                "pareto_df": df,
-                "NAC_min":   NAC_min,
-                "GHG_min":   GHG_min,
-            }
 
         # ── Full Pareto — epsilon constraint sweep ────────────
         GHG_max_val = GHG_at_A + abs(GHG_at_A) * 0.001
@@ -356,7 +388,7 @@ def run_pareto(user_inputs: dict,
             mdl_pt = Model(m, name=f"pareto_{pt_label}",
                            equations=m.getEquations(),
                            problem="MINLP", sense=Sense.MIN, objective=obj)
-            mdl_pt.solve(solver="BARON", options=solver_opts)
+            mdl_pt.solve(solver="SBB", options=solver_opts)
 
             status = str(mdl_pt.status)
 
@@ -370,7 +402,10 @@ def run_pareto(user_inputs: dict,
                     "CCAC": None, "CCWC": None, "CCINS": None,
                     "CCUC": None, "CCLB": None, "CCOC": None,
                     "CCRM": None, "CDISP": None, "CTIP": None,
-                    "REV": None, "CCTC": None, "Status": status,
+                    "REV": None, "CCTC": None,
+                    "GHG_IND": None, "GHG_DIR": None,
+                    "GHG_AQ": None, "GHG_DISP": None,
+                    "Status": status,
                 })
                 continue
 

@@ -68,10 +68,10 @@ def build_user_scalars(m: Container, user_inputs: dict) -> dict:
     scalars["f_FC_wet"]  = sc(m, "f_FC_wet",  comp.get("FIXED_CARBON", 0.035360))
  
     # ── Ultimate analysis (dry basis) — fixed ─────────────────────
-    scalars["C_frac"] = sc(m, "C_frac", 0.43270, "Carbon fraction dry basis")
+    scalars["C_frac"] = sc(m, "C_frac", 0.47940, "Carbon fraction dry basis")
     scalars["H_frac"] = sc(m, "H_frac", 0.06050, "Hydrogen fraction dry basis")
     scalars["O_frac"] = sc(m, "O_frac", 0.42890, "Oxygen fraction dry basis")
-    scalars["N_frac"] = sc(m, "N_frac", 0.07170, "Nitrogen fraction dry basis")
+    scalars["N_frac"] = sc(m, "N_frac", 0.02500, "Nitrogen fraction dry basis")
     scalars["S_frac"] = sc(m, "S_frac", 0.00620, "Sulfur fraction dry basis")
  
     # ── Global operating ──────────────────────────────────────────
@@ -102,8 +102,8 @@ def build_process_scalars(m: Container) -> dict:
     scalars["Rw_AER"]     = sc(m, "Rw_AER",     1.5,   "Water addition ratio AER kg/kg dry")
     scalars["theta_AER"]  = sc(m, "theta_AER",  24.0,  "AER HRT hours")
     scalars["eps_AER"]    = sc(m, "eps_AER",    0.80,  "AER vessel fill fraction")
-    scalars["yCO2_AER"]   = sc(m, "yCO2_AER",   1.20,  "kg CO2/kg VS degraded AER")
-    scalars["yH2O_AER"]   = sc(m, "yH2O_AER",   0.20,  "kg H2O/kg VS degraded AER")
+    scalars["yCO2_AER"]   = sc(m, "yCO2_AER",   0.857, "kg CO2/kg VS degraded AER")
+    scalars["yH2O_AER"]   = sc(m, "yH2O_AER",   0.143, "kg H2O/kg VS degraded AER")
  
     # ── ENZ (Enzymatic hydrolysis) ─────────────────────────────────
     scalars["V_ENZ_max"]  = sc(m, "V_ENZ_max",  500,   "Max ENZ vessel volume m3")
@@ -139,8 +139,8 @@ def build_process_scalars(m: Container) -> dict:
     scalars["eta_cap_AND"] = sc(m, "eta_cap_AND", 0.98,   "AND biogas capture efficiency")
     scalars["MW_CH4"]      = sc(m, "MW_CH4",      16.04,  "Molecular weight CH4 g/mol")
     scalars["MW_CO2_AND"]  = sc(m, "MW_CO2_AND",  44.01,  "Molecular weight CO2 g/mol")
-    scalars["eta_AND"]     = sc(m, "eta_AND",     1.0,    "AND VS degradation efficiency")
-    scalars["BMP_scen"]    = sc(m, "BMP_scen",    802.91, "Biochemical methane potential mL/g VS")
+    scalars["eta_AND"]     = sc(m, "eta_AND",     0.85,   "AND VS degradation efficiency")
+    scalars["BMP_scen"]    = sc(m, "BMP_scen",    400.0,  "Biochemical methane potential mL/g VS")
  
     # ── SLF (Sanitary landfill) ────────────────────────────────────
     scalars["DOC_value"]      = sc(m, "DOC_value",      0.358,   "Degradable organic carbon fraction")
@@ -180,8 +180,8 @@ def build_process_scalars(m: Container) -> dict:
     scalars["n_wwtp"]      = sc(m, "n_wwtp",      0.6,    "WWT yield coefficient kg VS/kg BOD")
     scalars["b_wwtp"]      = sc(m, "b_wwtp",      0.05,   "WWT decay coefficient 1/day")
     scalars["SRT_day"]     = sc(m, "SRT_day",     8.0,    "WWT sludge retention time days")
-    scalars["yCO2_WWT"]    = sc(m, "yCO2_WWT",    1.467,  "kg CO2/kg VS degraded WWT")
-    scalars["yH2O_WWT"]    = sc(m, "yH2O_WWT",    0.600,  "kg H2O/kg VS degraded WWT")
+    scalars["yCO2_WWT"]    = sc(m, "yCO2_WWT",    0.71,   "kg CO2/kg VS degraded WWT")
+    scalars["yH2O_WWT"]    = sc(m, "yH2O_WWT",    0.29,   "kg H2O/kg VS degraded WWT")
  
     # ── INC (Incineration) ─────────────────────────────────────────
     scalars["lambda_inc"]     = sc(m, "lambda_inc",     1.2,    "INC excess air ratio")
@@ -194,7 +194,7 @@ def build_process_scalars(m: Container) -> dict:
     scalars["CP_g"]          = sc(m, "CP_g",          1.15,   "Flue gas heat capacity kJ/kg C")
     scalars["H2_steam"]      = sc(m, "H2_steam",      3277.9, "Steam enthalpy at turbine inlet kJ/kg")
     scalars["H1_water"]      = sc(m, "H1_water",      104.83, "Feedwater enthalpy kJ/kg")
-    scalars["h1_value"]      = sc(m, "h1_value",      3500.0, "Turbine inlet enthalpy kJ/kg")
+    scalars["h1_value"]      = sc(m, "h1_value",      3277.9, "Turbine inlet enthalpy kJ/kg (= H2_steam)")
     scalars["h2_value"]      = sc(m, "h2_value",      2800.0, "Turbine outlet enthalpy kJ/kg")
     scalars["eta_turbine"]   = sc(m, "eta_turbine",   0.85,   "Turbine isentropic efficiency")
     scalars["eta_generator"] = sc(m, "eta_generator", 0.95,   "Generator efficiency")
@@ -245,10 +245,10 @@ def build_ghg_scalars(m: Container) -> dict:
     scalars["EF_elec"]           = sc(m, "EF_elec",           0.386,  "Grid electricity EF kg CO2/kWh")
     scalars["EF_CH4_WWT"]        = sc(m, "EF_CH4_WWT",        0.01,   "WWT CH4 emission factor kg/kg VS")
     scalars["EF_N2O_WWT"]        = sc(m, "EF_N2O_WWT",        0.001,  "WWT N2O emission factor kg/kg VS")
-    scalars["EF_HTLgas"]         = sc(m, "EF_HTLgas",         15.85,  "HTL gas combustion EF kg CO2/kg gas")
+    scalars["EF_HTLgas"]         = sc(m, "EF_HTLgas",         1.585,  "HTL gas combustion EF kg CO2/kg gas")
     scalars["EF_CH4_disp"]       = sc(m, "EF_CH4_disp",       2.75,   "CH4 displacement EF kg CO2/kg CH4")
     scalars["EF_BIOCRUDE_disp"]  = sc(m, "EF_BIOCRUDE_disp",  3.15,   "Biocrude displacement EF kg CO2/kg")
-    scalars["EF_COMPOST_disp"]   = sc(m, "EF_COMPOST_disp",   -0.3,   "Compost displacement EF kg CO2/kg")
+    scalars["EF_COMPOST_disp"]   = sc(m, "EF_COMPOST_disp",   0.3,    "Compost displacement EF kg CO2/kg")
     scalars["EF_ELEC_disp"]      = sc(m, "EF_ELEC_disp",      0.386,  "Electricity displacement EF kg CO2/kWh")
     scalars["EF_AQ_disp"]        = sc(m, "EF_AQ_disp",        0.015,  "Aqueous phase disposal EF kg CO2/kg")
     scalars["EF_CHAR_disp"]      = sc(m, "EF_CHAR_disp",      0.005,  "Char disposal EF kg CO2/kg")
@@ -330,7 +330,7 @@ def build_indexed_parameters(m: Container, sets: dict,
         ("ENZ",   882000), ("WWT",   882000), ("INC",  4700000),
         ("HTL",   645000), ("CMP",   786000), ("AND",   594000),
         ("SLF",   450000), ("CEN",    66000), ("FLT",    39000),
-        ("ABS",    30000), ("PSA",    80000), ("STB",    45000),
+        ("ABS",    30000), ("PSA",    80000), ("STB",  4500000),
     ])
     params["C0"] = C0
  

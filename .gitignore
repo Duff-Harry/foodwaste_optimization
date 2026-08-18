@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs and generated outputs
+*.log
+pareto_results.csv
+outputs/
+
+# Environment
+.venv/
+venv/
+.env
+
+# OS/editor junk
+.DS_Store
+.vscode/

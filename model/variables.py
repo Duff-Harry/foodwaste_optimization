@@ -169,7 +169,6 @@ def build_variables(m: Container, sets: dict, params: dict) -> dict:
     vars["ENZ_DS_in"] = Variable(m, name="ENZ_DS_in", type="positive")  # Dry solids entering ENZ (kg/hr)
  
     # ── HTL (Hydrothermal liquefaction) ────────────────────────────
-    vars["MaddW_HTL"]    = Variable(m, name="MaddW_HTL",    type="positive")  # Added water HTL (kg/hr)
     vars["Morg_HTL"]     = Variable(m, name="Morg_HTL",     type="positive")  # Organic feed HTL (kg/hr)
     vars["Mslurry17"]    = Variable(m, name="Mslurry17",    type="positive")  # HTL slurry stream 17 (kg/hr)
     vars["Mslurry22"]    = Variable(m, name="Mslurry22",    type="positive")  # HTL product slurry stream 22 (kg/hr)

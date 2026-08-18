@@ -239,7 +239,6 @@ def build_equations(m: Container, sets: dict,
     V_vessel_AER = vars["V_vessel_AER"]
     V_ENZ        = vars["V_ENZ"]
     ENZ_DS_in    = vars["ENZ_DS_in"]
-    MaddW_HTL    = vars["MaddW_HTL"]
     Morg_HTL     = vars["Morg_HTL"]
     Mslurry17    = vars["Mslurry17"]
     Mslurry22    = vars["Mslurry22"]
@@ -481,7 +480,8 @@ def build_equations(m: Container, sets: dict,
 
     eqs["ENZ_out_OTH"] = Equation(m, name="ENZ_out_OTH")
     eqs["ENZ_out_OTH"][...] = (M_var["17", "OTH"] ==
-                               M_var["14", "OTH"] + eta_ENZ * M_var["14", "CBH"])
+                               M_var["14", "OTH"] + eta_ENZ * M_var["14", "CBH"] +
+                               M_var["15", "ENZYME"])
 
     eqs["ENZ_out_rest"] = Equation(m, name="ENZ_out_rest", domain=k)
     eqs["ENZ_out_rest"][k].where[
