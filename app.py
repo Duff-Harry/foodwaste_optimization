@@ -287,25 +287,10 @@ if not st.session_state["app_started"]:
     </style>
 
     <div class="ef-landing">
-      <div class="ef-eyebrow">Rowan University · Sustainable Design &amp; Systems Medicine Lab</div>
       <h1>Turn a waste stream into the<br><span>lowest-cost, lowest-emissions</span> route to a product.</h1>
-      <p>Enter what you're throwing away. ECO-FAST runs every viable processing pathway —
-      digestion, composting, liquefaction, incineration — and returns the one that costs
+      <p>Enter what you are throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
       least, pollutes least, or balances both.</p>
       <div class="ef-metric-row">
-        <div class="ef-metric">
-          <div class="num">15</div>
-          <div class="lbl">TECHNOLOGIES MODELED</div>
-        </div>
-        <div class="ef-metric">
-          <div class="num">3</div>
-          <div class="lbl">OPTIMIZATION OBJECTIVES</div>
-        </div>
-        <div class="ef-metric">
-          <div class="num">&lt;5 min</div>
-          <div class="lbl">TO A RESULT</div>
-        </div>
-      </div>
     </div>
     """, unsafe_allow_html=True)
 
