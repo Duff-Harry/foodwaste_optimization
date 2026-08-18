@@ -295,8 +295,7 @@ if not st.session_state["app_started"]:
     </style>
 
     <div class="ef-landing">
-      <div class="ef-eyebrow">Rowan University · Sustainable Design &amp; Systems Medicine Lab</div>
-      <h1>Turn a waste stream into the<br><span>lowest-cost, lowest-emissions</span> route to a product.</h1>
+           <h1>Turn a waste stream into the<br><span>lowest-cost, lowest-emissions</span> route to a product.</h1>
       <p>Enter what you're throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
       least, pollutes least, or balances both.</p>
       <div class="ef-metric-row">
