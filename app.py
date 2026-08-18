@@ -174,49 +174,50 @@ def ej_risk_label(pctile):
 
 
 # ============================================================
-# HEADER
+# HEADER (called only after the user clicks "Get Started")
 # ============================================================
 def img_to_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-try:
-    rowan_b64 = img_to_base64("rowan_logo.png")
-    njdep_b64 = img_to_base64("njdep_logo.png")
-    st.markdown(f"""
-    <div style="background-color:#D4D0C8; padding:1px 16px;
-                display:flex; align-items:center; justify-content:space-between;">
-        <div style="display:flex; align-items:center; gap:12px;">
-            <div style="background:#2E8B57; color:white; font-weight:900;
-                        font-size:24px; width:56px; height:56px;
-                        display:flex; align-items:center; justify-content:center;
-                        border-radius:12px; font-family:Arial; flex-shrink:0;">EF</div>
-            <div>
-                <div style="font-size:24px; font-weight:bold;
-                            font-family:Arial; color:#000; line-height:1.2;">ECO-FAST</div>
-                <div style="font-size:12px; font-family:Arial; color:#444;">
-                    Ecological Impact of Food Waste Recycle Effluent</div>
+def render_header():
+    try:
+        rowan_b64 = img_to_base64("rowan_logo.png")
+        njdep_b64 = img_to_base64("njdep_logo.png")
+        st.markdown(f"""
+        <div style="background-color:#D4D0C8; padding:1px 16px;
+                    display:flex; align-items:center; justify-content:space-between;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="background:#2E8B57; color:white; font-weight:900;
+                            font-size:24px; width:56px; height:56px;
+                            display:flex; align-items:center; justify-content:center;
+                            border-radius:12px; font-family:Arial; flex-shrink:0;">EF</div>
+                <div>
+                    <div style="font-size:24px; font-weight:bold;
+                                font-family:Arial; color:#000; line-height:1.2;">ECO-FAST</div>
+                    <div style="font-size:12px; font-family:Arial; color:#444;">
+                        Ecological Impact of Food Waste Recycle Effluent</div>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:1px;">
+                <img src="data:image/png;base64,{rowan_b64}"
+                     style="height:70px; width:135px; object-fit:contain;
+                            mix-blend-mode:multiply; background:transparent;">
+                <img src="data:image/png;base64,{njdep_b64}"
+                     style="height:70px; width:70px; object-fit:contain;
+                            mix-blend-mode:multiply; background:transparent;">
             </div>
         </div>
-        <div style="display:flex; align-items:center; gap:1px;">
-            <img src="data:image/png;base64,{rowan_b64}"
-                 style="height:70px; width:135px; object-fit:contain;
-                        mix-blend-mode:multiply; background:transparent;">
-            <img src="data:image/png;base64,{njdep_b64}"
-                 style="height:70px; width:70px; object-fit:contain;
-                        mix-blend-mode:multiply; background:transparent;">
-        </div>
-    </div>
-    <hr style="margin:0; border-color:#808080;">
-    """, unsafe_allow_html=True)
-except:
-    st.markdown("<hr style='margin:2px 0 0 0; border-color:#808080;'>",
-                unsafe_allow_html=True)
+        <hr style="margin:0; border-color:#808080;">
+        """, unsafe_allow_html=True)
+    except:
+        st.markdown("<hr style='margin:2px 0 0 0; border-color:#808080;'>",
+                    unsafe_allow_html=True)
 
 
 # ============================================================
-# LANDING SCREEN — shown first, before the tabs.
-# Click "Get Started" to reveal the app.
+# LANDING SCREEN — shown first, standalone, full-bleed.
+# No header, no tab chrome. Click "Get Started" to reveal the app.
 # ============================================================
 if "app_started" not in st.session_state:
     st.session_state["app_started"] = False
@@ -236,15 +237,17 @@ if not st.session_state["app_started"]:
     st.markdown(f"""
     <style>
       .ef-landing {{
-        position: relative;
-        margin: -1rem -1rem 0 -1rem;
-        min-height: 78vh;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        margin: 0;
         display: flex; flex-direction: column; justify-content: center;
-        padding: 60px 60px;
+        padding: 60px 80px;
         background:
           linear-gradient(180deg, rgba(20,31,23,0.90) 0%, rgba(20,31,23,0.85) 55%, rgba(20,31,23,0.92) 100%),
           {_bg_css} center 32% / cover no-repeat;
         color: #F1EDE4;
+        z-index: 9999;
+        overflow-y: auto;
       }}
       .ef-eyebrow {{
         font-family: 'Courier New', monospace;
@@ -272,6 +275,11 @@ if not st.session_state["app_started"]:
         font-family: 'Courier New', monospace; font-size: 11px;
         letter-spacing: 0.04em; color: rgba(241,237,228,0.6); margin-top: 3px;
       }}
+      div[data-testid="stButton"] {{
+        position: fixed !important;
+        bottom: 90px; left: 80px;
+        z-index: 10000;
+      }}
       div[data-testid="stButton"] button {{
         background-color: #8FBF3F !important;
         color: #141F17 !important;
@@ -287,21 +295,39 @@ if not st.session_state["app_started"]:
     </style>
 
     <div class="ef-landing">
+      <div class="ef-eyebrow">Rowan University · Sustainable Design &amp; Systems Medicine Lab</div>
       <h1>Turn a waste stream into the<br><span>lowest-cost, lowest-emissions</span> route to a product.</h1>
-      <p>Enter what you are throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
+      <p>Enter what you're throwing away. ECO-FAST runs every viable processing pathway —
+      digestion, composting, liquefaction, incineration — and returns the one that costs
       least, pollutes least, or balances both.</p>
       <div class="ef-metric-row">
+        <div class="ef-metric">
+          <div class="num">15</div>
+          <div class="lbl">TECHNOLOGIES MODELED</div>
+        </div>
+        <div class="ef-metric">
+          <div class="num">3</div>
+          <div class="lbl">OPTIMIZATION OBJECTIVES</div>
+        </div>
+        <div class="ef-metric">
+          <div class="num">&lt;5 min</div>
+          <div class="lbl">TO A RESULT</div>
+        </div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
-    col_btn = st.columns([1, 6])
-    with col_btn[0]:
-        if st.button("Get Started →", key="get_started_btn"):
-            st.session_state["app_started"] = True
-            st.rerun()
+    if st.button("Get Started →", key="get_started_btn"):
+        st.session_state["app_started"] = True
+        st.rerun()
 
     st.stop()
 
+
+# ============================================================
+# Past the landing screen — show the header, then the tabs.
+# ============================================================
+render_header()
 
 # ============================================================
 # TABS
