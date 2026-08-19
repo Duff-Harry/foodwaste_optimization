@@ -221,9 +221,11 @@ def render_header():
 
 
 # ============================================================
-# LANDING SCREEN — live HTML/CSS text 
+# LANDING SCREEN — live HTML/CSS text
 # Explicitly resets mix-blend-mode and forces colors to rule out
 # any inherited blending/theming from elsewhere in the app.
+# Adds: fade-in entrance, text-shadow, and a Ken Burns zoom that
+# animates only the photo layer (not the text) via a pseudo-element.
 # ============================================================
 if "app_started" not in st.session_state:
     st.session_state["app_started"] = False
@@ -252,25 +254,41 @@ if not st.session_state["app_started"]:
         margin: 0 !important;
         display: flex; flex-direction: column; justify-content: center;
         padding: 60px 80px;
-        background:
-          linear-gradient(180deg, rgba(20,31,23,0.90) 0%, rgba(20,31,23,0.85) 55%, rgba(20,31,23,0.92) 100%),
-          {_bg_css} center 32% / cover no-repeat;
+        background: linear-gradient(180deg, rgba(20,31,23,0.90) 0%, rgba(20,31,23,0.85) 55%, rgba(20,31,23,0.92) 100%);
         z-index: 9999 !important;
-        overflow-y: auto;
+        overflow: hidden;
         mix-blend-mode: normal !important;
         isolation: isolate;
+      }}
+      .ef-landing::before {{
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: {_bg_css} center 32% / cover no-repeat;
+        z-index: -1;
+        animation: kenburns 26s ease-in-out infinite alternate;
+        transform-origin: center center;
+      }}
+      @keyframes kenburns {{
+        0%   {{ transform: scale(1.0); }}
+        100% {{ transform: scale(1.10) translate(-1.5%, -1%); }}
       }}
       .ef-landing * {{
         mix-blend-mode: normal !important;
         opacity: 1 !important;
         filter: none !important;
-        text-shadow: none !important;
+      }}
+      @keyframes fadeSlideUp {{
+        from {{ opacity: 0 !important; transform: translateY(18px); }}
+        to   {{ opacity: 1 !important; transform: translateY(0); }}
       }}
       .ef-headline {{
         font-size: 44px; font-weight: 800; line-height: 1.12;
         margin: 0 0 20px; max-width: 720px;
         color: rgb(241,237,228) !important;
         font-family: Arial, sans-serif;
+        text-shadow: 0 2px 10px rgba(0,0,0,0.55) !important;
+        animation: fadeSlideUp 0.7s ease-out both;
       }}
       .ef-headline .accent {{ color: rgb(143,191,63) !important; }}
       .ef-para {{
@@ -278,17 +296,21 @@ if not st.session_state["app_started"]:
         color: rgb(216,212,200) !important;
         max-width: 560px; margin: 0 0 8px;
         font-family: Arial, sans-serif;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.5) !important;
+        animation: fadeSlideUp 0.7s ease-out 0.18s both;
       }}
       .ef-ghost {{
         font-family: "Courier New", monospace; font-size: 13px;
         color: rgb(180,176,164) !important;
         text-decoration: underline; margin-top: 60px;
+        animation: fadeSlideUp 0.7s ease-out 0.34s both;
       }}
       div[data-testid="stButton"] {{
         position: fixed !important;
         bottom: 90px !important; left: 80px !important;
         width: auto !important;
         z-index: 10000 !important;
+        animation: fadeSlideUp 0.7s ease-out 0.46s both;
       }}
       div[data-testid="stButton"] button {{
         background-color: rgb(143,191,63) !important;
@@ -318,7 +340,7 @@ if not st.session_state["app_started"]:
     </div>
     """, unsafe_allow_html=True)
 
-    if st.button("Describe your waste stream \u2192", key="get_started_btn"):
+    if st.button("Describe your waste stream →", key="get_started_btn"):
         st.session_state["app_started"] = True
         st.rerun()
 
