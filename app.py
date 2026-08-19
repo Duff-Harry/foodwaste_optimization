@@ -237,12 +237,31 @@ if not st.session_state["app_started"]:
     st.markdown(f"""
     <style>
       .ef-hero-img {{
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        width: 100%; height: 100%;
-        object-fit: cover;
-        z-index: 9998;
+        position: fixed !important;
+        top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+        width: 100vw !important; height: 100vh !important;
+        max-width: none !important;
+        object-fit: cover !important;
+        z-index: 9998 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        animation: kenburns 22s ease-in-out infinite alternate !important;
+        transform-origin: center center;
       }}
+      @keyframes kenburns {{
+        0%   {{ transform: scale(1.0) translate(0, 0); }}
+        100% {{ transform: scale(1.12) translate(-1.5%, -1%); }}
+      }}
+      div[data-testid="stButton"] button {{
+        animation: pulseGlow 2.4s ease-in-out infinite !important;
+      }}
+      @keyframes pulseGlow {{
+        0%, 100% {{ box-shadow: 0 0 0 0 rgba(143,191,63,0.5); }}
+        50%      {{ box-shadow: 0 0 0 10px rgba(143,191,63,0); }}
+      }}
+      html, body {{ overflow: hidden !important; }}
+      .block-container {{ padding: 0 !important; margin: 0 !important; max-width: 100% !important; }}
+      [data-testid="stMarkdownContainer"] {{ padding: 0 !important; margin: 0 !important; }}
       div[data-testid="stButton"] {{
         position: fixed !important;
         bottom: 90px !important;
