@@ -290,6 +290,7 @@ if not st.session_state["app_started"]:
         text-shadow: 0 2px 10px rgba(0,0,0,0.55) !important;
         animation: fadeSlideUp 0.7s ease-out both;
       }}
+      .ef-headline .black {{ color: rgb(0,0,0) !important; }}
       .ef-headline .accent {{ color: rgb(143,191,63) !important; }}
       .ef-para {{
         font-size: 17px; line-height: 1.55;
@@ -329,8 +330,8 @@ if not st.session_state["app_started"]:
 
     <div class="ef-landing">
       <div class="ef-headline">
-        Turn a waste stream into the<br>
-        <span class="accent">lowest-cost, lowest-emissions</span> route to a product.
+        <span class="black">Turn a waste stream into a product.</span><br>
+        <span class="accent">Find the cheapest, cleanest</span> route to get there.
       </div>
       <div class="ef-para">
         Enter what you're throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
@@ -345,12 +346,6 @@ if not st.session_state["app_started"]:
         st.rerun()
 
     st.stop()
-
-# ============================================================
-# Past the landing screen — show the header, then the tabs.
-# ============================================================
-render_header()
-
 # ============================================================
 # TABS
 # ============================================================
