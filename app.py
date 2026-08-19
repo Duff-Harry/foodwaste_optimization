@@ -221,7 +221,7 @@ def render_header():
 
 
 # ============================================================
-# LANDING SCREEN — live HTML/CSS text (not a baked image).
+# LANDING SCREEN — live HTML/CSS text 
 # Explicitly resets mix-blend-mode and forces colors to rule out
 # any inherited blending/theming from elsewhere in the app.
 # ============================================================
@@ -311,8 +311,7 @@ if not st.session_state["app_started"]:
         <span class="accent">lowest-cost, lowest-emissions</span> route to a product.
       </div>
       <div class="ef-para">
-        Enter what you're throwing away. ECO-FAST runs every viable processing pathway \u2014
-        digestion, composting, liquefaction, incineration \u2014 and returns the one that costs
+        Enter what you're throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
         least, pollutes least, or balances both.
       </div>
       <div class="ef-ghost">see how the model works</div>
