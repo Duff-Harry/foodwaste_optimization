@@ -292,19 +292,26 @@ if not st.session_state["app_started"]:
       }}
       .ef-headline .black {{ color: rgb(0,0,0) !important; }}
       .ef-headline .accent {{ color: rgb(143,191,63) !important; }}
+      .ef-textblock {{
+        background: rgba(10,16,12,0.55);
+        backdrop-filter: blur(3px);
+        padding: 16px 20px;
+        border-radius: 8px;
+        display: inline-block;
+        max-width: 560px;
+        animation: fadeSlideUp 0.7s ease-out 0.18s both;
+      }}
       .ef-para {{
         font-size: 17px; line-height: 1.55;
-        color: rgb(216,212,200) !important;
-        max-width: 560px; margin: 0 0 8px;
+        color: rgb(241,237,228) !important;
+        margin: 0 0 8px;
         font-family: Arial, sans-serif;
-        text-shadow: 0 1px 6px rgba(0,0,0,0.5) !important;
-        animation: fadeSlideUp 0.7s ease-out 0.18s both;
       }}
       .ef-ghost {{
         font-family: "Courier New", monospace; font-size: 13px;
-        color: rgb(180,176,164) !important;
-        text-decoration: underline; margin-top: 60px;
-        animation: fadeSlideUp 0.7s ease-out 0.34s both;
+        color: rgb(220,216,204) !important;
+        text-decoration: underline; margin-top: 4px;
+        display: block;
       }}
       div[data-testid="stButton"] {{
         position: fixed !important;
@@ -333,11 +340,13 @@ if not st.session_state["app_started"]:
         <span class="black">Turn a waste stream into a product.</span><br>
         <span class="accent">Find the cheapest, cleanest</span> route to get there.
       </div>
-      <div class="ef-para">
-        Enter what you're throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
-        least, pollutes least, or balances both.
+      <div class="ef-textblock">
+        <div class="ef-para">
+          Enter what you're throwing away. ECO-FAST runs every viable processing pathway and returns the one that costs
+          least, pollutes least, or balances both.
+        </div>
+        <div class="ef-ghost">see how the model works</div>
       </div>
-      <div class="ef-ghost">see how the model works</div>
     </div>
     """, unsafe_allow_html=True)
 
